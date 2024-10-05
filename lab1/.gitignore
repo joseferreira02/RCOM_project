@@ -1,3 +1,4 @@
 #ignore compiled code files
 
 *.out
+*.c
