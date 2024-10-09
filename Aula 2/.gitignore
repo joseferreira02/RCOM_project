@@ -1,0 +1,7 @@
+
+#ignore compiled code files
+
+*.out
+cable
+read_noncanonical
+write_noncanonical
