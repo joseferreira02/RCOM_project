@@ -209,7 +209,7 @@ int main(int argc, char *argv[])
 
 
     if((TRUE)){
-        printf("SET RECEIVED");
+        printf("SET RECEIVED\n");
         
         unsigned char buf[BUF_SIZE] = {0};
         buf[0] = FLAG;

@@ -90,7 +90,7 @@ int main(int argc, char *argv[])
     // Set input mode (non-canonical, no echo,...)
     newtio.c_lflag = 0;
     newtio.c_cc[VTIME] = 30; // Inter-character timer unused
-    newtio.c_cc[VMIN] = 5;  // Blocking read until 5 chars received
+    newtio.c_cc[VMIN] = 0;  // Blocking read until 5 chars received
 
     // VTIME e VMIN should be changed in order to protect with a
     // timeout the reception of the following character(s)
@@ -111,35 +111,11 @@ int main(int argc, char *argv[])
 
     printf("New termios structure set\n");
 
-    // Create string to send
-    /*
-    unsigned char buf[BUF_SIZE] = {0};
-
-    for (int i = 0; i < BUF_SIZE; i++)
-    {
-        buf[i] = 'a' + i % 26;
-    }
-    */
 
     // In non-canonical mode, '\n' does not end the writing.
     // Test this condition by placing a '\n' in the middle of the buffer.
     // The whole buffer must be sent even with the '\n'.
 
-    /*
-    unsigned char buf[BUF_SIZE] = {0};
-
-    buf[0] = FLAG;
-    buf[1] = ADDRESS; // frames sent by sender
-    buf[2] = SET; // control
-    buf[3] = buf[1] ^ buf[2];
-    buf[4] = FLAG;
-
-
-
-    int bytes = write(fd, buf, BUF_SIZE);
-    printf("%d bytes written\n", bytes);
-    
-    */
 
     //ENABLE ALARM
 
@@ -200,25 +176,6 @@ int main(int argc, char *argv[])
 
     // Wait until all bytes have been written to the serial port
     sleep(1);
-
-    /*
-    unsigned char readBuf[BUF_SIZE] = {0};
-    //read the response from Receiver 
-    while(STOP==FALSE){
-
-        int bytes = read(fd,readBuf,BUF_SIZE);
-
-        for(int i = 0;i < BUF_SIZE;i++){
-            printf("var = 0x%02X\n", readBuf[i]);
-        }
-
-        if(readBuf[3] != (readBuf[1] ^ readBuf[2])){
-            printf("error!\n");
-            exit(-1);
-        }
-        STOP = TRUE;
-    }
-    */
 
 
     // Restore the old port settings
