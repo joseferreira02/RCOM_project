@@ -27,43 +27,6 @@ typedef struct
 #define FALSE 0
 #define TRUE 1
 
-#define CNTRL_BUF_SIZE 5
-
-//trama Bytes
-#define FLAG 0X7E
-#define ADDRESS_RX 0X01
-#define ADDRESS_TX 0X03
-#define UA 0X07
-#define SET 0X03
-
-
-//alarm
-int alarmCount = 0;
-int alarmEnabled = FALSE;
-void alarmHandler(int signal);
-
-
-
-//state Machine --
-typedef enum {
-    START_STATE,
-    FLAG_RCV,
-    A_RCV,
-    C_RCV,
-    BCC_RCV,
-    STOP_STATE
-} StateType;
-
-
-typedef struct {
-    StateType currentState; // Current state of the state machine
-} StateMachine;
-
-void transition(StateMachine* sm, StateType newState) {
-    sm->currentState = newState; // Update the current state
-    printf("Transitioned to state: %d\n", sm->currentState);
-}
-
 
 // Open a connection using the "port" parameters defined in struct linkLayer.
 // Return "1" on success or "-1" on error.

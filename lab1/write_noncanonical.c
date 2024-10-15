@@ -89,8 +89,8 @@ int main(int argc, char *argv[])
 
     // Set input mode (non-canonical, no echo,...)
     newtio.c_lflag = 0;
-    newtio.c_cc[VTIME] = 30; // Inter-character timer unused
-    newtio.c_cc[VMIN] = 5;  // Blocking read until 5 chars received
+    newtio.c_cc[VTIME] = 10; // Inter-character timer unused
+    newtio.c_cc[VMIN] = 0;  // Blocking read until 5 chars received
 
     // VTIME e VMIN should be changed in order to protect with a
     // timeout the reception of the following character(s)
@@ -164,7 +164,7 @@ int main(int argc, char *argv[])
             int bytes = write(fd, buf, BUF_SIZE);
             printf("%d bytes written\n", bytes);
 
-            alarm(3); // Set alarm to be triggered in 3s
+            alarm(2); // Set alarm to be triggered in 3s
             alarmEnabled = TRUE;
 
             //READ
