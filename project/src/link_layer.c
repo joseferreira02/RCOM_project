@@ -19,6 +19,7 @@
 #define ADDRESS_TX 0X03
 #define UA 0X07
 #define SET 0X03
+#define DISC 0x0B
 
 ////////////////////////////////////////////////
 // Alarm Handler
@@ -32,6 +33,12 @@ void alarmHandler(int signal)
     alarmCount++;
     printf("Alarm #%d\n", alarmCount);
 };
+
+void resetAlarm()
+{
+    alarmCount = 0;
+    alarmEnabled = FALSE;
+}
 
 ////////////////////////////////////////////////
 // State Machine
@@ -79,7 +86,7 @@ int proccessCtrlByte(StateMachine *sm, StateType address, StateType control, uns
         }
         else if (curr_byte == FLAG)
         {
-            *bufferPosition = 0; // Reset buffer position when a new FLAG is received
+            *bufferPosition = 0;                     // Reset buffer position when a new FLAG is received
             buffer[(*bufferPosition)++] = curr_byte; // Store FLAG
             transition(sm, FLAG_RCV);
         }
@@ -97,7 +104,7 @@ int proccessCtrlByte(StateMachine *sm, StateType address, StateType control, uns
         }
         else if (curr_byte == FLAG)
         {
-            *bufferPosition = 0; // Reset buffer position when a new FLAG is received
+            *bufferPosition = 0;                     // Reset buffer position when a new FLAG is received
             buffer[(*bufferPosition)++] = curr_byte; // Store FLAG
             transition(sm, FLAG_RCV);
         }
@@ -115,7 +122,7 @@ int proccessCtrlByte(StateMachine *sm, StateType address, StateType control, uns
         }
         else if (curr_byte == FLAG)
         {
-            *bufferPosition = 0; // Reset buffer position when a new FLAG is received
+            *bufferPosition = 0;                     // Reset buffer position when a new FLAG is received
             buffer[(*bufferPosition)++] = curr_byte; // Store FLAG
             transition(sm, FLAG_RCV);
         }
@@ -130,6 +137,7 @@ int proccessCtrlByte(StateMachine *sm, StateType address, StateType control, uns
         {
             buffer[(*bufferPosition)++] = curr_byte; // Store FLAG
             transition(sm, STOP_STATE);
+            return 0;
         }
         else
         {
@@ -142,7 +150,6 @@ int proccessCtrlByte(StateMachine *sm, StateType address, StateType control, uns
     }
     return -1;
 }
-
 
 void buildCtrlWord(unsigned char address, unsigned char control)
 {
@@ -164,13 +171,18 @@ void buildCtrlWord(unsigned char address, unsigned char control)
     printf("%d bytes written\n", bytes);
 }
 
+LinkLayer cp;
 ////////////////////////////////////////////////
 // LLOPEN
 ////////////////////////////////////////////////
 int llopen(LinkLayer connectionParameters)
 {
-    if (openSerialPort(connectionParameters.serialPort,
-                       connectionParameters.baudRate) < 0)
+    // save connectionParameters
+    cp = connectionParameters;
+
+    int fd = openSerialPort(connectionParameters.serialPort,
+                            connectionParameters.baudRate);
+    if (fd < 0)
     {
         printf("Error opening serial port\n");
         exit(-1);
@@ -207,9 +219,7 @@ int llopen(LinkLayer connectionParameters)
     else
     {
 
-        // ENABLE ALARM
-        alarmCount = 0;
-        alarmEnabled = FALSE;
+        resetAlarm();
         (void)signal(SIGALRM, alarmHandler);
 
         // SET UP STATE MACHINE AND BUFFER
@@ -243,22 +253,21 @@ int llopen(LinkLayer connectionParameters)
             {
                 continue;
             }
+
             printf("Read byte: 0x%02X\n", curr_byte);
 
             result = proccessCtrlByte(&sm, ADDRESS_RX, UA, curr_byte, readbuf, &bufferPosition);
-            if(sm.currentState == STOP_STATE){
-                printf("UA received\n");
-                break;
-            }
         }
         if (alarmCount == connectionParameters.nRetransmissions)
         {
             printf("Maximum retransmissions reached. Exiting...\n");
             return -1;
         }
+
+        printf("UA received\n");
     }
 
-    return 1;
+    return fd;
 }
 
 ////////////////////////////////////////////////
@@ -278,7 +287,6 @@ int llread(unsigned char *packet)
 {
     // TODO
     // must decide if package is for llopen or llclose
-
     return 0;
 }
 
@@ -287,7 +295,143 @@ int llread(unsigned char *packet)
 ////////////////////////////////////////////////
 int llclose(int showStatistics)
 {
-    // TODO
+    // show statistics
+
+    if (cp.role == LlRx)
+    {
+
+        StateMachine sm;
+        sm.currentState = START_STATE;
+
+        unsigned char buf[CTRL_BUF_SIZE] = {0};
+        unsigned char curr_byte;
+        int bufferPosition = 0;
+
+        // reads DISC BYTE
+        do
+        {
+            int readBytes = readByteSerialPort(&curr_byte);
+            if (readBytes < 0)
+            {
+                printf("error\n");
+                exit(-1);
+            }
+            if (readBytes == 0)
+            {
+                continue;
+            }
+            printf("Read byte: 0x%02X\n", curr_byte);
+        } while (proccessCtrlByte(&sm, ADDRESS_TX, DISC, curr_byte, buf, &bufferPosition) != 0);
+        printf("DISC received\n");
+
+        // SENDS DISC BYTE
+        buildCtrlWord(ADDRESS_RX, DISC);
+        printf("sent DISC\n");
+
+        // reset buffer/sm
+        bufferPosition = 0;
+        memset(buf, 0, sizeof(buf));
+        sm.currentState = START_STATE;
+        int result = -1;
+        // alarm setup
+        resetAlarm();
+        (void)signal(SIGALRM, alarmHandler);
+
+        // READS UA BYTE
+        while (alarmCount < cp.nRetransmissions && result < 0)
+        {
+            if (alarmEnabled == FALSE)
+            {
+
+                buildCtrlWord(ADDRESS_TX, DISC);
+                printf("sent DISC\n");
+
+                alarm(cp.timeout);
+                alarmEnabled = TRUE;
+            }
+
+            int readBytes = readByteSerialPort(&curr_byte);
+            if (readBytes < 0)
+            {
+                printf("error\n");
+                exit(-1);
+            }
+            if (readBytes == 0)
+            {
+                continue;
+            }
+            printf("Read byte: 0x%02X\n", curr_byte);
+
+            result = proccessCtrlByte(&sm, ADDRESS_TX, UA, curr_byte, buf, &bufferPosition);
+        }
+        if (alarmCount == cp.nRetransmissions)
+        {
+            printf("Maximum retransmissions reached. Exiting...\n");
+            return -1;
+        }
+        printf("UA RECEIVED\n");
+    }
+    else
+    {
+
+
+        //alarm setup
+        resetAlarm();
+        (void)signal(SIGALRM, alarmHandler);
+
+        // SET UP STATE MACHINE AND BUFFER
+        StateMachine sm;
+        sm.currentState = START_STATE;
+
+        unsigned char readbuf[CTRL_BUF_SIZE] = {0};
+        unsigned char curr_byte;
+        int bufferPosition = 0;
+        int result = -1;
+
+        //reads DISC BYTE
+        while (alarmCount < cp.nRetransmissions && result < 0)
+        {
+            if (alarmEnabled == FALSE)
+            {
+
+                buildCtrlWord(ADDRESS_TX, DISC);
+                printf("sent DISC\n");
+
+                alarm(cp.timeout);
+                alarmEnabled = TRUE;
+            }
+
+            int readBytes = readByteSerialPort(&curr_byte);
+            if (readBytes < 0)
+            {
+                printf("error\n");
+                exit(-1);
+            }
+            if (readBytes == 0)
+            {
+                continue;
+            }
+            printf("Read byte: 0x%02X\n", curr_byte);
+            result = proccessCtrlByte(&sm, ADDRESS_RX, DISC, curr_byte, readbuf, &bufferPosition);
+        }
+        printf("DISC received\n");
+
+        //sends UA BYTE
+        buildCtrlWord(ADDRESS_TX, UA);
+        printf("sent UA\n");
+        if (alarmCount == cp.nRetransmissions)
+        {
+            printf("Maximum retransmissions reached. Exiting...\n");
+            return -1;
+        }
+    }
+
+    if (showStatistics)
+    {
+        printf("---- Statistics ----\n");
+        printf("EMPTY");
+        printf("--------------------\n");
+    }
 
     int clstat = closeSerialPort();
     return clstat;

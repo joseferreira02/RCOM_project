@@ -23,5 +23,10 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
         printf("Error: Failed to open link layer connection.\n");
         return;
     }
+    if (llclose(1) < 0)
+    {
+        printf("Error: Failed to close link layer connection.\n");
+        return;
+    }
 
 }
