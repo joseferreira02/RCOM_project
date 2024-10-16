@@ -21,6 +21,8 @@
 #define SET 0X03
 #define DISC 0x0B
 
+static int sequenceNumber = 0;
+
 ////////////////////////////////////////////////
 // Alarm Handler
 ////////////////////////////////////////////////
@@ -275,9 +277,96 @@ int llopen(LinkLayer connectionParameters)
 ////////////////////////////////////////////////
 int llwrite(const unsigned char *buf, int bufSize)
 {
-    // TODO
+    // Dynamically allocate memory for the frame
+    unsigned char *frame = (unsigned char *)malloc(CTRL_BUF_SIZE + bufSize + 2);
+    if (frame == NULL) {
+        printf("Memory allocation failed\n");
+        return -1; // Return error if memory allocation fails
+    }
 
-    return 0;
+    // Build the frame (FLAG | ADDRESS | CONTROL | BCC1 | DATA | BCC2 | FLAG)
+    frame[0] = FLAG;
+    frame[1] = ADDRESS_TX;
+    frame[2] = sequenceNumber ? 0x80 : 0x00; // Sequence number (Ns = 0 or 1)
+    frame[3] = frame[1]^frame[2];
+
+    // Copy data to the frame
+    for (int i = 0; i < bufSize; i++){
+        frame[4 + i] = buf[i];
+    }
+
+    // Calculate BCC2
+    unsigned char BCC2 = 0;
+    for (int i = 0; i < bufSize; i++){
+        BCC2 ^= buf[i];
+    }
+
+    frame[4 + bufSize] = BCC2;
+    frame[5 + bufSize] = FLAG;
+
+    (void)signal(SIGALRM, alarmHandler);
+
+    // SET UP STATE MACHINE AND BUFFER
+    StateMachine sm;
+    sm.currentState = START_STATE;
+
+    // Wait for acknowledgment frame (RR or REJ)
+    unsigned char ackFrame[CTRL_BUF_SIZE];
+    unsigned char curr_byte;
+    int bufferPosition = 0;
+    int result = -1;
+    int bytesSent = 0;
+
+    // Retransmission logic
+    while (alarmCount < cp.nRetransmissions && result < 0){
+        
+        if(alarmEnabled == FALSE){
+            // Send the frame
+            bytesSent = writeBytesSerialPort(frame, CTRL_BUF_SIZE + bufSize + 2);
+            printf("Sent I Frame\n");
+
+            // Start timer
+            alarm(cp.timeout);
+            alarmEnabled = TRUE;
+        }
+
+        int readBytes = readByteSerialPort(&curr_byte);
+        if (readBytes < 0)
+        {
+            printf("error\n");
+            exit(-1);
+        }
+        if (readBytes == 0) continue;
+
+        printf("Read byte: 0x%02X\n", curr_byte);
+        // State Machine processing
+        // Process the acceptance or rejection frame sent back by the receiver
+
+        result = processCtrlByte;
+
+        if (result == RR_RECEIVED){
+            printf("Acknoledgement received\n");
+            alarm(0);
+            sequenceNumber = (sequenceNumber + 1) % 2; // Update Sequence Number
+            return bytesSent;
+        }
+        else if (result == REJ_RECEIVED){
+            printf("Frame rejected. Retransmiting...\n");
+            return llwrite(buf, bufsize);
+        }
+        else {
+            printf("Timeout occurred\n");
+            exit(-1);
+        }
+    }
+
+    if (alarmCount == cp.nRetransmissions)
+    {
+        printf("Maximum retransmissions reached. Exiting...\n");
+        return -1;
+    }
+
+    free(frame);
 }
 
 ////////////////////////////////////////////////
