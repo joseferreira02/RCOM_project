@@ -20,6 +20,7 @@
 #define UA 0X07
 #define SET 0X03
 #define DISC 0x0B
+#define ESC 0x7D
 
 static int sequenceNumber = 0;
 
@@ -66,7 +67,7 @@ void transition(StateMachine *sm, StateType newState)
     sm->currentState = newState;
 }
 
-int proccessCtrlByte(StateMachine *sm, StateType address, StateType control, unsigned char curr_byte, unsigned char buffer[], int *bufferPosition)
+int processCtrlByte(StateMachine *sm, StateType address, StateType control, unsigned char curr_byte, unsigned char buffer[], int *bufferPosition)
 {
     switch (sm->currentState)
     {
@@ -173,6 +174,39 @@ void buildCtrlWord(unsigned char address, unsigned char control)
     printf("%d bytes written\n", bytes);
 }
 
+
+unsigned char* byteStuffing(const unsigned char *data, int dataSize, int *newSize){
+
+    // Allocate memory for the worst case possible
+    unsigned char *stuffedData = (unsigned char *)malloc(2*dataSize-2);
+    if (stuffedData == NULL){
+        printf("Memory allocation failed\n");
+        *newSize = -1;
+        exit(-1);
+    }
+
+    int j = 0; // Index for stuffed data
+
+    stuffedData[j++] = data[0]; // Initial flag should not be stuffed
+
+    // Apply byte stuffing from the second byte to the second-to-last byte
+    for (int i = 0; i < dataSize - 1; i++){
+        if (data[i] == FLAG){
+            stuffedData[j++] = ESC;
+            stuffedData[j++] = 0x5E;
+        }
+        else if (data[i] == ESC){
+            stuffedData[j++] = ESC;
+            stuffedData[j++] = 0x5D;
+        }
+        else stuffedData[j++] = data[i];
+    }
+
+    stuffedData[j++] = data[dataSize-1];
+    *newSize = j; // Update the size of the stuffed data
+    return stuffedData;
+}
+
 LinkLayer cp;
 ////////////////////////////////////////////////
 // LLOPEN
@@ -212,7 +246,7 @@ int llopen(LinkLayer connectionParameters)
                 continue;
             }
             printf("Read byte: 0x%02X\n", curr_byte);
-        } while (proccessCtrlByte(&sm, ADDRESS_TX, SET, curr_byte, buf, &bufferPosition) != 0);
+        } while (processCtrlByte(&sm, ADDRESS_TX, SET, curr_byte, buf, &bufferPosition) != 0);
 
         printf("SET received\n");
         buildCtrlWord(ADDRESS_RX, UA);
@@ -258,7 +292,7 @@ int llopen(LinkLayer connectionParameters)
 
             printf("Read byte: 0x%02X\n", curr_byte);
 
-            result = proccessCtrlByte(&sm, ADDRESS_RX, UA, curr_byte, readbuf, &bufferPosition);
+            result = processCtrlByte(&sm, ADDRESS_RX, UA, curr_byte, readbuf, &bufferPosition);
         }
         if (alarmCount == connectionParameters.nRetransmissions)
         {
@@ -284,7 +318,7 @@ int llwrite(const unsigned char *buf, int bufSize)
         return -1; // Return error if memory allocation fails
     }
 
-    // Build the frame (FLAG | ADDRESS | CONTROL | BCC1 | DATA | BCC2 | FLAG)
+    // Build the frame without stuffing (FLAG | ADDRESS | CONTROL | BCC1 | DATA | BCC2 | FLAG)
     frame[0] = FLAG;
     frame[1] = ADDRESS_TX;
     frame[2] = sequenceNumber ? 0x80 : 0x00; // Sequence number (Ns = 0 or 1)
@@ -304,6 +338,15 @@ int llwrite(const unsigned char *buf, int bufSize)
     frame[4 + bufSize] = BCC2;
     frame[5 + bufSize] = FLAG;
 
+    // Apply byte stuffing
+    int stuffedSize;
+    unsigned char *stuffedFrame = byteStuffing(frame, CTRL_BUF_SIZE + bufSize + 2, &stuffedSize);
+    if (stuffedFrame == NULL){
+        printf("ERROR: Couldn't perform byte stuffing\n");
+        free(frame);
+        exit(-1);
+    }
+
     (void)signal(SIGALRM, alarmHandler);
 
     // SET UP STATE MACHINE AND BUFFER
@@ -322,7 +365,7 @@ int llwrite(const unsigned char *buf, int bufSize)
         
         if(alarmEnabled == FALSE){
             // Send the frame
-            bytesSent = writeBytesSerialPort(frame, CTRL_BUF_SIZE + bufSize + 2);
+            bytesSent = writeBytesSerialPort(stuffedFrame, CTRL_BUF_SIZE + bufSize + 2);
             printf("Sent I Frame\n");
 
             // Start timer
@@ -342,7 +385,7 @@ int llwrite(const unsigned char *buf, int bufSize)
         // State Machine processing
         // Process the acceptance or rejection frame sent back by the receiver
 
-        result = processCtrlByte;
+        result = processCtrlByte(&sm, ADDRESS_RX, UA, curr_byte, ackFrame, &bufferPosition != 0);
 
         if (result == RR_RECEIVED){
             printf("Acknoledgement received\n");
@@ -410,7 +453,7 @@ int llclose(int showStatistics)
                 continue;
             }
             printf("Read byte: 0x%02X\n", curr_byte);
-        } while (proccessCtrlByte(&sm, ADDRESS_TX, DISC, curr_byte, buf, &bufferPosition) != 0);
+        } while (processCtrlByte(&sm, ADDRESS_TX, DISC, curr_byte, buf, &bufferPosition) != 0);
         printf("DISC received\n");
 
         // SENDS DISC BYTE
@@ -451,7 +494,7 @@ int llclose(int showStatistics)
             }
             printf("Read byte: 0x%02X\n", curr_byte);
 
-            result = proccessCtrlByte(&sm, ADDRESS_TX, UA, curr_byte, buf, &bufferPosition);
+            result = processCtrlByte(&sm, ADDRESS_TX, UA, curr_byte, buf, &bufferPosition);
         }
         if (alarmCount == cp.nRetransmissions)
         {
@@ -501,7 +544,7 @@ int llclose(int showStatistics)
                 continue;
             }
             printf("Read byte: 0x%02X\n", curr_byte);
-            result = proccessCtrlByte(&sm, ADDRESS_RX, DISC, curr_byte, readbuf, &bufferPosition);
+            result = processCtrlByte(&sm, ADDRESS_RX, DISC, curr_byte, readbuf, &bufferPosition);
         }
         printf("DISC received\n");
 
