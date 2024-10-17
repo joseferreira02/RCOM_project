@@ -21,6 +21,8 @@
 #define SET 0X03
 #define DISC 0x0B
 #define ESC 0x7D
+#define RR_RECEIVED 1
+#define REJ_RECEIVED -1
 
 static int sequenceNumber = 0;
 
@@ -149,8 +151,13 @@ int processCtrlByte(StateMachine *sm, StateType address, StateType control, unsi
         break;
 
     case STOP_STATE:
-        return 0;
+        // Access control byte
+        unsigned char control = buffer[2];
+
+        if (control == 0xAA || control == 0xAB) return RR_RECEIVED;
+        else if (control == 0x54 || control == 0x55) return REJ_RECEIVED; 
     }
+    
     return -1;
 }
 
@@ -175,13 +182,13 @@ void buildCtrlWord(unsigned char address, unsigned char control)
 }
 
 
-unsigned char* byteStuffing(const unsigned char *data, int dataSize, int *newSize){
+unsigned char* byteStuffing(const unsigned char *data, int dataSize, int *stuffedSize){
 
     // Allocate memory for the worst case possible
     unsigned char *stuffedData = (unsigned char *)malloc(2*dataSize-2);
     if (stuffedData == NULL){
         printf("Memory allocation failed\n");
-        *newSize = -1;
+        *stuffedSize = -1;
         exit(-1);
     }
 
@@ -203,8 +210,48 @@ unsigned char* byteStuffing(const unsigned char *data, int dataSize, int *newSiz
     }
 
     stuffedData[j++] = data[dataSize-1];
-    *newSize = j; // Update the size of the stuffed data
+    *stuffedSize = j; // Update the size of the stuffed data
     return stuffedData;
+}
+
+unsigned char* createIFrame(const unsigned char *buf, int bufSize, int* stuffedSize){
+    // Dynamically allocate memory for the frame
+    unsigned char *frame = (unsigned char *)malloc(CTRL_BUF_SIZE + bufSize + 2);
+    if (frame == NULL) {
+        printf("Memory allocation failed\n");
+        return -1; // Return error if memory allocation fails
+    }
+
+    // Build the frame without stuffing (FLAG | ADDRESS | CONTROL | BCC1 | DATA | BCC2 | FLAG)
+    frame[0] = FLAG;
+    frame[1] = ADDRESS_TX;
+    frame[2] = sequenceNumber ? 0x80 : 0x00; // Sequence number (Ns = 0 or 1)
+    frame[3] = frame[1]^frame[2];
+
+    // Copy data to the frame
+    for (int i = 0; i < bufSize; i++){
+        frame[4 + i] = buf[i];
+    }
+
+    // Calculate BCC2
+    unsigned char BCC2 = 0;
+    for (int i = 0; i < bufSize; i++){
+        BCC2 ^= buf[i];
+    }
+
+    frame[4 + bufSize] = BCC2;
+    frame[5 + bufSize] = FLAG;
+
+    // Apply byte stuffing
+    int stuffedSize;
+    unsigned char *stuffedFrame = byteStuffing(frame, CTRL_BUF_SIZE + bufSize + 2, &stuffedSize);
+    if (stuffedFrame == NULL){
+        printf("ERROR: Couldn't perform byte stuffing\n");
+        free(frame);
+        exit(-1);
+    }
+
+    return stuffedFrame;
 }
 
 LinkLayer cp;
@@ -311,41 +358,7 @@ int llopen(LinkLayer connectionParameters)
 ////////////////////////////////////////////////
 int llwrite(const unsigned char *buf, int bufSize)
 {
-    // Dynamically allocate memory for the frame
-    unsigned char *frame = (unsigned char *)malloc(CTRL_BUF_SIZE + bufSize + 2);
-    if (frame == NULL) {
-        printf("Memory allocation failed\n");
-        return -1; // Return error if memory allocation fails
-    }
-
-    // Build the frame without stuffing (FLAG | ADDRESS | CONTROL | BCC1 | DATA | BCC2 | FLAG)
-    frame[0] = FLAG;
-    frame[1] = ADDRESS_TX;
-    frame[2] = sequenceNumber ? 0x80 : 0x00; // Sequence number (Ns = 0 or 1)
-    frame[3] = frame[1]^frame[2];
-
-    // Copy data to the frame
-    for (int i = 0; i < bufSize; i++){
-        frame[4 + i] = buf[i];
-    }
-
-    // Calculate BCC2
-    unsigned char BCC2 = 0;
-    for (int i = 0; i < bufSize; i++){
-        BCC2 ^= buf[i];
-    }
-
-    frame[4 + bufSize] = BCC2;
-    frame[5 + bufSize] = FLAG;
-
-    // Apply byte stuffing
-    int stuffedSize;
-    unsigned char *stuffedFrame = byteStuffing(frame, CTRL_BUF_SIZE + bufSize + 2, &stuffedSize);
-    if (stuffedFrame == NULL){
-        printf("ERROR: Couldn't perform byte stuffing\n");
-        free(frame);
-        exit(-1);
-    }
+    unsigned char* stuffedFrame = createIFrame(buf, bufSize, &stuffedSize);
 
     (void)signal(SIGALRM, alarmHandler);
 
@@ -382,24 +395,20 @@ int llwrite(const unsigned char *buf, int bufSize)
         if (readBytes == 0) continue;
 
         printf("Read byte: 0x%02X\n", curr_byte);
+
         // State Machine processing
         // Process the acceptance or rejection frame sent back by the receiver
-
-        result = processCtrlByte(&sm, ADDRESS_RX, UA, curr_byte, ackFrame, &bufferPosition != 0);
+        result = processCtrlByte(&sm, ADDRESS_RX, UA, curr_byte, ackFrame, &bufferPosition);
 
         if (result == RR_RECEIVED){
             printf("Acknoledgement received\n");
             alarm(0);
             sequenceNumber = (sequenceNumber + 1) % 2; // Update Sequence Number
-            return bytesSent;
+            break;
         }
         else if (result == REJ_RECEIVED){
             printf("Frame rejected. Retransmiting...\n");
-            return llwrite(buf, bufsize);
-        }
-        else {
-            printf("Timeout occurred\n");
-            exit(-1);
+            resetAlarm();
         }
     }
 
@@ -408,8 +417,8 @@ int llwrite(const unsigned char *buf, int bufSize)
         printf("Maximum retransmissions reached. Exiting...\n");
         return -1;
     }
-
-    free(frame);
+    free(stuffedFrame);
+    return bytesSent;
 }
 
 ////////////////////////////////////////////////
