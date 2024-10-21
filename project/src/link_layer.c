@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 // MISC
 #define _POSIX_SOURCE 1 // POSIX compliant source
@@ -150,14 +151,14 @@ int processCtrlByte(StateMachine *sm, StateType address, StateType control, unsi
         }
         break;
 
-    case STOP_STATE:
+    case STOP_STATE:{
         // Access control byte
         unsigned char control = buffer[2];
 
         if (control == 0xAA || control == 0xAB) return RR_RECEIVED;
         else if (control == 0x54 || control == 0x55) return REJ_RECEIVED; 
+        }
     }
-    
     return -1;
 }
 
@@ -219,7 +220,7 @@ unsigned char* createIFrame(const unsigned char *buf, int bufSize, int* stuffedS
     unsigned char *frame = (unsigned char *)malloc(CTRL_BUF_SIZE + bufSize + 2);
     if (frame == NULL) {
         printf("Memory allocation failed\n");
-        return -1; // Return error if memory allocation fails
+        return NULL; // Return error if memory allocation fails
     }
 
     // Build the frame without stuffing (FLAG | ADDRESS | CONTROL | BCC1 | DATA | BCC2 | FLAG)
@@ -243,14 +244,14 @@ unsigned char* createIFrame(const unsigned char *buf, int bufSize, int* stuffedS
     frame[5 + bufSize] = FLAG;
 
     // Apply byte stuffing
-    int stuffedSize;
-    unsigned char *stuffedFrame = byteStuffing(frame, CTRL_BUF_SIZE + bufSize + 2, &stuffedSize);
+    unsigned char *stuffedFrame = byteStuffing(frame, CTRL_BUF_SIZE + bufSize + 2, stuffedSize);
     if (stuffedFrame == NULL){
         printf("ERROR: Couldn't perform byte stuffing\n");
         free(frame);
         exit(-1);
     }
 
+    free(frame);
     return stuffedFrame;
 }
 
@@ -358,6 +359,8 @@ int llopen(LinkLayer connectionParameters)
 ////////////////////////////////////////////////
 int llwrite(const unsigned char *buf, int bufSize)
 {
+
+    int stuffedSize = 0;
     unsigned char* stuffedFrame = createIFrame(buf, bufSize, &stuffedSize);
 
     (void)signal(SIGALRM, alarmHandler);
@@ -378,7 +381,7 @@ int llwrite(const unsigned char *buf, int bufSize)
         
         if(alarmEnabled == FALSE){
             // Send the frame
-            bytesSent = writeBytesSerialPort(stuffedFrame, CTRL_BUF_SIZE + bufSize + 2);
+            bytesSent = writeBytesSerialPort(stuffedFrame, stuffedSize);
             printf("Sent I Frame\n");
 
             // Start timer
