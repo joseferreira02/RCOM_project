@@ -23,7 +23,7 @@
 #define DISC 0x0B
 #define ESC 0x7D
 #define RR_RECEIVED 1
-#define REJ_RECEIVED -1
+#define REJ_RECEIVED 0
 
 static int sequenceNumber = 0;
 
@@ -72,92 +72,103 @@ void transition(StateMachine *sm, StateType newState)
 
 int processCtrlByte(StateMachine *sm, StateType address, StateType control, unsigned char curr_byte, unsigned char buffer[], int *bufferPosition)
 {
+    // Array of possible RR and REJ control bytes
+    unsigned char possibleControlBytes[] = {0xAA, 0xAB, 0x54, 0x55};
+
     switch (sm->currentState)
     {
 
-    case START_STATE:
-        *bufferPosition = 0; // Reset buffer position at the start
-        if (curr_byte == FLAG)
-        {
-            buffer[(*bufferPosition)++] = curr_byte; // Store FLAG
-            transition(sm, FLAG_RCV);
-        }
-        break;
+        case START_STATE:
+            *bufferPosition = 0; // Reset buffer position at the start
+            if (curr_byte == FLAG)
+            {
+                buffer[(*bufferPosition)++] = curr_byte; // Store FLAG
+                transition(sm, FLAG_RCV);
+            }
+            break;
 
-    case FLAG_RCV:
-        if (curr_byte == address)
-        {
-            buffer[(*bufferPosition)++] = curr_byte; // Store ADDRESS_RX
-            transition(sm, A_RCV);
-        }
-        else if (curr_byte == FLAG)
-        {
-            *bufferPosition = 0;                     // Reset buffer position when a new FLAG is received
-            buffer[(*bufferPosition)++] = curr_byte; // Store FLAG
-            transition(sm, FLAG_RCV);
-        }
-        else
-        {
-            transition(sm, START_STATE);
-        }
-        break;
+        case FLAG_RCV:
+            if (curr_byte == address)
+            {
+                buffer[(*bufferPosition)++] = curr_byte; // Store ADDRESS_RX
+                transition(sm, A_RCV);
+            }
+            else if (curr_byte == FLAG)
+            {
+                *bufferPosition = 0;                     // Reset buffer position when a new FLAG is received
+                buffer[(*bufferPosition)++] = curr_byte; // Store FLAG
+                transition(sm, FLAG_RCV);
+            }
+            else
+            {
+                transition(sm, START_STATE);
+            }
+            break;
 
-    case A_RCV:
-        if (curr_byte == control)
-        {
-            buffer[(*bufferPosition)++] = curr_byte; // Store CONTROL
-            transition(sm, C_RCV);
-        }
-        else if (curr_byte == FLAG)
-        {
-            *bufferPosition = 0;                     // Reset buffer position when a new FLAG is received
-            buffer[(*bufferPosition)++] = curr_byte; // Store FLAG
-            transition(sm, FLAG_RCV);
-        }
-        else
-        {
-            transition(sm, START_STATE);
-        }
-        break;
+        case A_RCV:
+            // Checks if the current byte is one of the possible control bytes (RR and REJ)
+            for (int i = 0; i < sizeof(possibleControlBytes); i++){
+                if (curr_byte == possibleControlBytes[i]){
+                    buffer[(*bufferPosition)++] = curr_byte; // Store CONTROL
+                    transition(sm, C_RCV);
+                    return -1;
+                }
+            }
+            if (curr_byte == control)
+            {
+                buffer[(*bufferPosition)++] = curr_byte; // Store CONTROL
+                transition(sm, C_RCV);
+            }
+            else if (curr_byte == FLAG)
+            {
+                *bufferPosition = 0;                     // Reset buffer position when a new FLAG is received
+                buffer[(*bufferPosition)++] = curr_byte; // Store FLAG
+                transition(sm, FLAG_RCV);
+            }
+            else if (curr_byte)
+            {
+                transition(sm, START_STATE);
+            }
+            break;
 
-    case C_RCV:
-        if (curr_byte == (buffer[1] ^ buffer[2]))
-        {
-            buffer[(*bufferPosition)++] = curr_byte; // Store BCC
-            transition(sm, BCC_RCV);
-        }
-        else if (curr_byte == FLAG)
-        {
-            *bufferPosition = 0;                     // Reset buffer position when a new FLAG is received
-            buffer[(*bufferPosition)++] = curr_byte; // Store FLAG
-            transition(sm, FLAG_RCV);
-        }
-        else
-        {
-            transition(sm, START_STATE);
-        }
-        break;
+        case C_RCV:
+            if (curr_byte == (buffer[1] ^ buffer[2]))
+            {
+                buffer[(*bufferPosition)++] = curr_byte; // Store BCC
+                transition(sm, BCC_RCV);
+            }
+            else if (curr_byte == FLAG)
+            {
+                *bufferPosition = 0;                     // Reset buffer position when a new FLAG is received
+                buffer[(*bufferPosition)++] = curr_byte; // Store FLAG
+                transition(sm, FLAG_RCV);
+            }
+            else
+            {
+                transition(sm, START_STATE);
+            }
+            break;
 
-    case BCC_RCV:
-        if (curr_byte == FLAG)
-        {
-            buffer[(*bufferPosition)++] = curr_byte; // Store FLAG
-            transition(sm, STOP_STATE);
-            return 0;
-        }
-        else
-        {
-            transition(sm, START_STATE);
-        }
-        break;
+        case BCC_RCV:
+            if (curr_byte == FLAG)
+            {
+                buffer[(*bufferPosition)++] = curr_byte; // Store FLAG
+                transition(sm, STOP_STATE);
+                return 0;
+            }
+            else
+            {
+                transition(sm, START_STATE);
+            }
+            break;
 
-    case STOP_STATE:{
-        // Access control byte
-        unsigned char control = buffer[2];
+        case STOP_STATE:{
+            // Access control byte
+            unsigned char access_control = buffer[2];
 
-        if (control == 0xAA || control == 0xAB) return RR_RECEIVED;
-        else if (control == 0x54 || control == 0x55) return REJ_RECEIVED; 
-        }
+            if (access_control == 0xAA || access_control == 0xAB) return RR_RECEIVED;
+            else if (access_control == 0x54 || access_control == 0x55) return REJ_RECEIVED; 
+            }
     }
     return -1;
 }
@@ -183,34 +194,40 @@ void buildCtrlWord(unsigned char address, unsigned char control)
 }
 
 
-unsigned char* byteStuffing(const unsigned char *data, int dataSize, int *stuffedSize){
+unsigned char* byteStuffing(const unsigned char *frame, int frameSize, int *stuffedSize){
 
     // Allocate memory for the worst case possible
-    unsigned char *stuffedData = (unsigned char *)malloc(2*dataSize-2);
+    unsigned char *stuffedData = (unsigned char *)malloc(2*frameSize-2);
     if (stuffedData == NULL){
         printf("Memory allocation failed\n");
         *stuffedSize = -1;
         exit(-1);
     }
 
-    int j = 0; // Index for stuffed data
+    int j = 0; // Index for stuf
+    
+    // First 4 bytes shouldn't be stuffed (FLAG, ADDRESS, CONTROL, BCC)
+    stuffedData[j++] = frame[0];
+    stuffedData[j++] = frame[1];
+    stuffedData[j++] = frame[2];
+    stuffedData[j++] = frame[3];
 
-    stuffedData[j++] = data[0]; // Initial flag should not be stuffed
-
-    // Apply byte stuffing from the second byte to the second-to-last byte
-    for (int i = 0; i < dataSize - 1; i++){
-        if (data[i] == FLAG){
+    // Apply byte stuffing to the data section
+    for (int i = 4; i < frameSize-2; i++){
+        if (frame[i] == FLAG){
             stuffedData[j++] = ESC;
             stuffedData[j++] = 0x5E;
         }
-        else if (data[i] == ESC){
+        else if (frame[i] == ESC){
             stuffedData[j++] = ESC;
             stuffedData[j++] = 0x5D;
         }
-        else stuffedData[j++] = data[i];
+        else stuffedData[j++] = frame[i];
     }
 
-    stuffedData[j++] = data[dataSize-1];
+    // Last 2 bytes shouldn't be stuffed (BCC2, FLAG)
+    stuffedData[j++] = frame[frameSize-2];
+    stuffedData[j++] = frame[frameSize-1];
     *stuffedSize = j; // Update the size of the stuffed data
     return stuffedData;
 }
@@ -401,17 +418,18 @@ int llwrite(const unsigned char *buf, int bufSize)
 
         // State Machine processing
         // Process the acceptance or rejection frame sent back by the receiver
-        result = processCtrlByte(&sm, ADDRESS_RX, UA, curr_byte, ackFrame, &bufferPosition);
+        result = processCtrlByte(&sm, ADDRESS_RX, NULL, curr_byte, ackFrame, &bufferPosition);
 
         if (result == RR_RECEIVED){
-            printf("Acknoledgement received\n");
+            printf("Acknowledgement received\n");
             alarm(0);
             sequenceNumber = (sequenceNumber + 1) % 2; // Update Sequence Number
             break;
         }
         else if (result == REJ_RECEIVED){
             printf("Frame rejected. Retransmiting...\n");
-            resetAlarm();
+            alarmEnabled = FALSE;
+            alarmCount++;
         }
     }
 
