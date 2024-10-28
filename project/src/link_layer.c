@@ -602,7 +602,7 @@ int llwrite(const unsigned char *buf, int bufSize)
 
         // State Machine processing
         // Process the acceptance or rejection frame sent back by the receiver
-        result = processCtrlByte(&sm, ADDRESS_RX, NULL, curr_byte, ackFrame, &bufferPosition);
+        result = proccessCtrlByte(&sm, ADDRESS_RX, UA, curr_byte, ackFrame, &bufferPosition);
 
         if (result == RR_RECEIVED){
             printf("Acknowledgement received\n");
