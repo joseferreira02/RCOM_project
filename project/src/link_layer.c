@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <string.h>
 
 // MISC
 #define _POSIX_SOURCE 1 // POSIX compliant source
@@ -16,16 +17,37 @@
 
 // trama Bytes
 #define FLAG 0X7E
+
+#define ESCFLAG 0X5E
+#define ESCESC 0X5D
+
 #define ADDRESS_RX 0X01
 #define ADDRESS_TX 0X03
 #define UA 0X07
 #define SET 0X03
 #define DISC 0x0B
 #define ESC 0x7D
+#define C0 0x00
+#define C1 0x80
+
+#define RR0 0xAA
+#define RR1 0xAB
+#define REJ0 0x054
+#define REJ1 0x55
+
 #define RR_RECEIVED 1
 #define REJ_RECEIVED 0
 
 static int sequenceNumber = 0;
+unsigned char sequenceChar = C1;
+int isValid = FALSE;
+int isRepeated = FALSE;
+static int escCheck = FALSE;
+
+// C
+// 00000000 / 0x00 Information frame number 0
+// 10000000 / 0x80 Information frame number 1
+//
 
 ////////////////////////////////////////////////
 // Alarm Handler
@@ -46,6 +68,17 @@ void resetAlarm()
     alarmEnabled = FALSE;
 }
 
+// returns 1 if BCC2 is correct
+int checkBCC2(unsigned char message[], int charsRead, unsigned char bcc2_byte)
+{
+    unsigned char BCC2;
+    for (int i = 0; i < charsRead; i++)
+    {
+        BCC2 ^= message[i];
+    }
+    return BCC2 == bcc2_byte;
+}
+
 ////////////////////////////////////////////////
 // State Machine
 ////////////////////////////////////////////////
@@ -57,6 +90,10 @@ typedef enum
     A_RCV,
     C_RCV,
     BCC_RCV,
+
+    // IFRAME
+    INFO_STATE,
+
     STOP_STATE
 } StateType;
 
@@ -70,13 +107,14 @@ void transition(StateMachine *sm, StateType newState)
     sm->currentState = newState;
 }
 
-int processCtrlByte(StateMachine *sm, StateType address, StateType control, unsigned char curr_byte, unsigned char buffer[], int *bufferPosition)
+int proccessInfoByte(StateMachine *sm, StateType address, StateType control, unsigned char curr_byte, unsigned char buffer[], int *bufferPosition, unsigned char message[], int *charsRead)
 {
     // Array of possible RR and REJ control bytes
     unsigned char possibleControlBytes[] = {0xAA, 0xAB, 0x54, 0x55};
 
     switch (sm->currentState)
     {
+
 
         case START_STATE:
             *bufferPosition = 0; // Reset buffer position at the start
@@ -131,23 +169,163 @@ int processCtrlByte(StateMachine *sm, StateType address, StateType control, unsi
             }
             break;
 
-        case C_RCV:
-            if (curr_byte == (buffer[1] ^ buffer[2]))
+    case C_RCV:
+        if (curr_byte == C0 || curr_byte == C1)
+        {
+            if (curr_byte == sequenceChar)
             {
-                buffer[(*bufferPosition)++] = curr_byte; // Store BCC
-                transition(sm, BCC_RCV);
-            }
-            else if (curr_byte == FLAG)
-            {
-                *bufferPosition = 0;                     // Reset buffer position when a new FLAG is received
-                buffer[(*bufferPosition)++] = curr_byte; // Store FLAG
-                transition(sm, FLAG_RCV);
+                isRepeated = TRUE;
             }
             else
             {
-                transition(sm, START_STATE);
+                isRepeated = FALSE;
+            }
+            buffer[(*bufferPosition)++] = curr_byte;
+            sequenceChar = curr_byte;
+            transition(sm, INFO_STATE);
+        }
+        else if (curr_byte == FLAG)
+        {
+            *bufferPosition = 0;                     // Reset buffer position when a new FLAG is received
+            buffer[(*bufferPosition)++] = curr_byte; // Store FLAG
+            transition(sm, FLAG_RCV);
+        }
+        else
+        {
+            transition(sm, START_STATE);
+        }
+        break;
+
+    case BCC_RCV:
+        if (curr_byte == FLAG)
+        {
+            buffer[(*bufferPosition)++] = curr_byte; // Store FLAG
+            transition(sm, INFO_STATE);
+        }
+        else
+        {
+            transition(sm, START_STATE);
+        }
+        break;
+    case INFO_STATE:
+        switch (curr_byte)
+        {
+        case FLAG:
+            if(!escCheck)transition(sm, STOP_STATE);
+            break;
+        case ESCFLAG:
+            if (escCheck)
+            {
+                buffer[(*bufferPosition)++] = FLAG;
+                message[(*charsRead)++] = FLAG;
+                escCheck = FALSE;
+            }
+            else
+            {
+                escCheck = TRUE;
             }
             break;
+        case ESCESC:
+            if (escCheck)
+            {
+                buffer[(*bufferPosition)++] = ESC;
+                message[(*charsRead)++] = ESC;
+                escCheck = FALSE;
+            }
+            else
+            {
+                escCheck = TRUE;
+            }
+
+            break;
+        case ESC:
+            escCheck = TRUE;
+            break;
+        default:
+            buffer[(*bufferPosition)++] = curr_byte; // Store FLAG
+            message[(*charsRead)++] = curr_byte;
+            break;
+        }
+        break;
+    case STOP_STATE:
+        // checks condition
+        isValid = checkBCC2(message, *charsRead - 2, buffer[(*bufferPosition) - 1]);
+        return 0;
+        break;
+    }
+    return -1;
+}
+
+int proccessCtrlByte(StateMachine *sm, StateType address, StateType control, unsigned char curr_byte, unsigned char buffer[], int *bufferPosition)
+{
+    switch (sm->currentState)
+    {
+
+    case START_STATE:
+        *bufferPosition = 0; // Reset buffer position at the start
+        if (curr_byte == FLAG)
+        {
+            buffer[(*bufferPosition)++] = curr_byte; // Store FLAG
+            transition(sm, FLAG_RCV);
+        }
+        break;
+
+    case FLAG_RCV:
+        if (curr_byte == address)
+        {
+            buffer[(*bufferPosition)++] = curr_byte; // Store ADDRESS_RX
+            transition(sm, A_RCV);
+        }
+        else if (curr_byte == FLAG)
+        {
+            *bufferPosition = 0;                     // Reset buffer position when a new FLAG is received
+            buffer[(*bufferPosition)++] = curr_byte; // Store FLAG
+            transition(sm, FLAG_RCV);
+        }
+        else
+        {
+            transition(sm, START_STATE);
+        }
+        break;
+
+    case A_RCV:
+
+
+        if (curr_byte == control) // curr_byte == (RR0 || RR1 || REJ0 || REJ1)
+        {
+            buffer[(*bufferPosition)++] = curr_byte; // Store CONTROL
+            transition(sm, C_RCV);
+        }
+        else if (curr_byte == FLAG)
+        {
+            *bufferPosition = 0;                     // Reset buffer position when a new FLAG is received
+            buffer[(*bufferPosition)++] = curr_byte; // Store FLAG
+            transition(sm, FLAG_RCV);
+        }
+        else
+        {
+            transition(sm, START_STATE);
+        }
+        break;
+
+    case C_RCV:
+        if (curr_byte == (buffer[1] ^ buffer[2]))
+        {
+            buffer[(*bufferPosition)++] = curr_byte; // Store BCC
+            transition(sm, BCC_RCV);
+        }
+        else if (curr_byte == FLAG)
+        {
+            *bufferPosition = 0;                     // Reset buffer position when a new FLAG is received
+            buffer[(*bufferPosition)++] = curr_byte; // Store FLAG
+            transition(sm, FLAG_RCV);
+        }
+        else
+        {
+            transition(sm, START_STATE);
+        }
+        break;
+ 
 
         case BCC_RCV:
             if (curr_byte == FLAG)
@@ -169,6 +347,9 @@ int processCtrlByte(StateMachine *sm, StateType address, StateType control, unsi
             if (access_control == 0xAA || access_control == 0xAB) return RR_RECEIVED;
             else if (access_control == 0x54 || access_control == 0x55) return REJ_RECEIVED; 
             }
+
+    default:
+        break;
     }
     return -1;
 }
@@ -310,8 +491,8 @@ int llopen(LinkLayer connectionParameters)
             {
                 continue;
             }
-            printf("Read byte: 0x%02X\n", curr_byte);
-        } while (processCtrlByte(&sm, ADDRESS_TX, SET, curr_byte, buf, &bufferPosition) != 0);
+            // printf("Read byte: 0x%02X\n", curr_byte);
+        } while (proccessCtrlByte(&sm, ADDRESS_TX, SET, curr_byte, buf, &bufferPosition) != 0);
 
         printf("SET received\n");
         buildCtrlWord(ADDRESS_RX, UA);
@@ -355,17 +536,20 @@ int llopen(LinkLayer connectionParameters)
                 continue;
             }
 
-            printf("Read byte: 0x%02X\n", curr_byte);
+            // printf("Read byte: 0x%02X\n", curr_byte);
 
-            result = processCtrlByte(&sm, ADDRESS_RX, UA, curr_byte, readbuf, &bufferPosition);
+            result = proccessCtrlByte(&sm, ADDRESS_RX, UA, curr_byte, readbuf, &bufferPosition);
         }
         if (alarmCount == connectionParameters.nRetransmissions)
         {
             printf("Maximum retransmissions reached. Exiting...\n");
             return -1;
         }
-
-        printf("UA received\n");
+        if (!result)
+        {
+            printf("UA received\n");
+            alarm(0);
+        }
     }
 
     return fd;
@@ -395,7 +579,7 @@ int llwrite(const unsigned char *buf, int bufSize)
 
     // Retransmission logic
     while (alarmCount < cp.nRetransmissions && result < 0){
-        
+
         if(alarmEnabled == FALSE){
             // Send the frame
             bytesSent = writeBytesSerialPort(stuffedFrame, stuffedSize);
@@ -447,8 +631,52 @@ int llwrite(const unsigned char *buf, int bufSize)
 ////////////////////////////////////////////////
 int llread(unsigned char *packet)
 {
-    // TODO
-    // must decide if package is for llopen or llclose
+    StateMachine sm;
+    sm.currentState = START_STATE;
+    unsigned char curr_byte;
+    unsigned char buffer[5];
+    int bufferPosition = 0;
+
+    // message
+    unsigned char message[5];
+    int charsRead = 0;
+    isValid = FALSE;
+    isRepeated = FALSE;
+
+    // just proccess the byte  + destuffing
+    do
+    {
+        int readBytes = readByteSerialPort(&curr_byte);
+        if (readBytes < 0)
+        {
+            printf("error\n");
+            exit(-1);
+        }
+        if (readBytes == 0)
+        {
+            continue;
+        }
+        printf("Read byte: 0x%02X\n", curr_byte);
+
+    } while (proccessInfoByte(&sm, ADDRESS_TX, sequenceNumber, curr_byte, buffer, &bufferPosition, message, &charsRead) != 0);
+
+    // Send RR|REJ
+    if (isValid && isRepeated)
+    {
+        sequenceNumber == 0 ? buildCtrlWord(ADDRESS_RX, RR0) : buildCtrlWord(ADDRESS_RX, RR1);
+        printf("REPEATED RR SENT\n");
+    }
+    if (isValid && !isRepeated)
+    {
+        sequenceNumber == 1 ? buildCtrlWord(ADDRESS_RX, RR0) : buildCtrlWord(ADDRESS_RX, RR1);
+        printf("CORRECT RR SENT\n");
+    }
+    if (!isValid)
+    {
+        sequenceNumber == 0 ? buildCtrlWord(ADDRESS_RX, REJ0) : buildCtrlWord(ADDRESS_RX, REJ1);
+        printf("REJ SENT\n");
+    }
+
     return 0;
 }
 
@@ -482,8 +710,8 @@ int llclose(int showStatistics)
             {
                 continue;
             }
-            printf("Read byte: 0x%02X\n", curr_byte);
-        } while (processCtrlByte(&sm, ADDRESS_TX, DISC, curr_byte, buf, &bufferPosition) != 0);
+            // printf("Read byte: 0x%02X\n", curr_byte);
+        } while (proccessCtrlByte(&sm, ADDRESS_TX, DISC, curr_byte, buf, &bufferPosition) != 0);
         printf("DISC received\n");
 
         // SENDS DISC BYTE
@@ -522,22 +750,27 @@ int llclose(int showStatistics)
             {
                 continue;
             }
-            printf("Read byte: 0x%02X\n", curr_byte);
+            // printf("Read byte: 0x%02X\n", curr_byte);
 
-            result = processCtrlByte(&sm, ADDRESS_TX, UA, curr_byte, buf, &bufferPosition);
+            result = proccessCtrlByte(&sm, ADDRESS_TX, UA, curr_byte, buf, &bufferPosition);
         }
+
+        if (!result)
+        {
+            printf("UA received\n");
+            alarm(0);
+        }
+
         if (alarmCount == cp.nRetransmissions)
         {
             printf("Maximum retransmissions reached. Exiting...\n");
             return -1;
         }
-        printf("UA RECEIVED\n");
     }
     else
     {
 
-
-        //alarm setup
+        // alarm setup
         resetAlarm();
         (void)signal(SIGALRM, alarmHandler);
 
@@ -550,7 +783,7 @@ int llclose(int showStatistics)
         int bufferPosition = 0;
         int result = -1;
 
-        //reads DISC BYTE
+        // reads DISC BYTE
         while (alarmCount < cp.nRetransmissions && result < 0)
         {
             if (alarmEnabled == FALSE)
@@ -573,19 +806,25 @@ int llclose(int showStatistics)
             {
                 continue;
             }
-            printf("Read byte: 0x%02X\n", curr_byte);
-            result = processCtrlByte(&sm, ADDRESS_RX, DISC, curr_byte, readbuf, &bufferPosition);
+            // printf("Read byte: 0x%02X\n", curr_byte);
+            result = proccessCtrlByte(&sm, ADDRESS_RX, DISC, curr_byte, readbuf, &bufferPosition);
         }
-        printf("DISC received\n");
 
-        //sends UA BYTE
-        buildCtrlWord(ADDRESS_TX, UA);
-        printf("sent UA\n");
+        if (!result)
+        {
+            printf("DISC received\n");
+            alarm(0);
+        }
+
         if (alarmCount == cp.nRetransmissions)
         {
             printf("Maximum retransmissions reached. Exiting...\n");
             return -1;
         }
+
+        // sends UA BYTE
+        buildCtrlWord(ADDRESS_TX, UA);
+        printf("sent UA\n");
     }
 
     if (showStatistics)

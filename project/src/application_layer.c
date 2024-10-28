@@ -17,6 +17,8 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
     connectionParameters.timeout = timeout;
     connectionParameters.role = strcmp(role, "tx") ? LlRx : LlTx;
 
+
+    printf("--------------LLOPEN--------------\n");
     // Call llopen to initialize the link layer connection
     if (llopen(connectionParameters) < 0)
     {
