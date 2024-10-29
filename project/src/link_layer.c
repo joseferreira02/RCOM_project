@@ -21,6 +21,9 @@
 #define ESCFLAG 0X5E
 #define ESCESC 0X5D
 
+
+#define ANSWER 0X00
+
 #define ADDRESS_RX 0X01
 #define ADDRESS_TX 0X03
 #define UA 0X07
@@ -281,8 +284,7 @@ int proccessCtrlByte(StateMachine *sm, StateType address, StateType control, uns
 
     case A_RCV:
 
-
-        if (curr_byte == control) // curr_byte == (RR0 || RR1 || REJ0 || REJ1)
+        if (curr_byte == control || (((curr_byte == RR0) || (curr_byte == RR1) || (curr_byte == REJ0) || (curr_byte == REJ1))  && control == ANSWER) ) // curr_byte == (RR0 || RR1 || REJ0 || REJ1)
         {
             buffer[(*bufferPosition)++] = curr_byte; // Store CONTROL
             transition(sm, C_RCV);
