@@ -27,6 +27,8 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
         return;
     }
 
+    /*
+
     if (connectionParameters.role == LlTx){
         // Transmitter mode
         FILE * file = fopen(filename, "rb");
@@ -88,6 +90,9 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
         fclose(file);
         printf("File reception complete\n");
     }
+    */
+
+   //connectionParameters.role == LlTx ? llwrite() : llread(); ???
 
     if (llclose(1) < 0)
     {
