@@ -21,6 +21,9 @@
 #define ESCFLAG 0X5E
 #define ESCESC 0X5D
 
+
+#define IControlResponse 0X00
+
 #define ADDRESS_RX 0X01
 #define ADDRESS_TX 0X03
 #define UA 0X07
@@ -110,8 +113,6 @@ void transition(StateMachine *sm, StateType newState)
 int proccessInfoByte(StateMachine *sm, StateType address, StateType control, unsigned char curr_byte, unsigned char buffer[], int *bufferPosition, unsigned char message[], int *charsRead)
 {
     // Array of possible RR and REJ control bytes
-    unsigned char possibleControlBytes[] = {0xAA, 0xAB, 0x54, 0x55};
-
     switch (sm->currentState)
     {
 
@@ -144,14 +145,7 @@ int proccessInfoByte(StateMachine *sm, StateType address, StateType control, uns
             break;
 
         case A_RCV:
-            // Checks if the current byte is one of the possible control bytes (RR and REJ)
-            for (int i = 0; i < sizeof(possibleControlBytes); i++){
-                if (curr_byte == possibleControlBytes[i]){
-                    buffer[(*bufferPosition)++] = curr_byte; // Store CONTROL
-                    transition(sm, C_RCV);
-                    return -1;
-                }
-            }
+
             if (curr_byte == control)
             {
                 buffer[(*bufferPosition)++] = curr_byte; // Store CONTROL
@@ -290,8 +284,7 @@ int proccessCtrlByte(StateMachine *sm, StateType address, StateType control, uns
 
     case A_RCV:
 
-
-        if (curr_byte == control) // curr_byte == (RR0 || RR1 || REJ0 || REJ1)
+        if (curr_byte == control || (((curr_byte == RR0) || (curr_byte == RR1) || (curr_byte == REJ0) || (curr_byte == REJ1))  && control == IControlResponse) ) // curr_byte == (RR0 || RR1 || REJ0 || REJ1)
         {
             buffer[(*bufferPosition)++] = curr_byte; // Store CONTROL
             transition(sm, C_RCV);
@@ -330,6 +323,7 @@ int proccessCtrlByte(StateMachine *sm, StateType address, StateType control, uns
         case BCC_RCV:
             if (curr_byte == FLAG)
             {
+                
                 buffer[(*bufferPosition)++] = curr_byte; // Store FLAG
                 transition(sm, STOP_STATE);
                 return 0;
@@ -371,7 +365,7 @@ void buildCtrlWord(unsigned char address, unsigned char control)
         printf("Error opening bytes\n");
         exit(-1);
     }
-    printf("%d bytes written\n", bytes);
+
 }
 
 
@@ -552,15 +546,14 @@ int llopen(LinkLayer connectionParameters)
         }
     }
 
+    alarmEnabled = FALSE;
     return fd;
 }
-
 ////////////////////////////////////////////////
 // LLWRITE
 ////////////////////////////////////////////////
 int llwrite(const unsigned char *buf, int bufSize)
 {
-
     int stuffedSize = 0;
     unsigned char* stuffedFrame = createIFrame(buf, bufSize, &stuffedSize);
 
@@ -576,10 +569,8 @@ int llwrite(const unsigned char *buf, int bufSize)
     int bufferPosition = 0;
     int result = -1;
     int bytesSent = 0;
-
     // Retransmission logic
     while (alarmCount < cp.nRetransmissions && result < 0){
-
         if(alarmEnabled == FALSE){
             // Send the frame
             bytesSent = writeBytesSerialPort(stuffedFrame, stuffedSize);
@@ -602,7 +593,7 @@ int llwrite(const unsigned char *buf, int bufSize)
 
         // State Machine processing
         // Process the acceptance or rejection frame sent back by the receiver
-        result = proccessCtrlByte(&sm, ADDRESS_RX, UA, curr_byte, ackFrame, &bufferPosition);
+        result = proccessCtrlByte(&sm, ADDRESS_RX, IControlResponse, curr_byte, ackFrame, &bufferPosition);
 
         if (result == RR_RECEIVED){
             printf("Acknowledgement received\n");
@@ -714,9 +705,7 @@ int llclose(int showStatistics)
         } while (proccessCtrlByte(&sm, ADDRESS_TX, DISC, curr_byte, buf, &bufferPosition) != 0);
         printf("DISC received\n");
 
-        // SENDS DISC BYTE
-        buildCtrlWord(ADDRESS_RX, DISC);
-        printf("sent DISC\n");
+        
 
         // reset buffer/sm
         bufferPosition = 0;
@@ -733,7 +722,7 @@ int llclose(int showStatistics)
             if (alarmEnabled == FALSE)
             {
 
-                buildCtrlWord(ADDRESS_TX, DISC);
+                buildCtrlWord(ADDRESS_RX, DISC);
                 printf("sent DISC\n");
 
                 alarm(cp.timeout);
@@ -806,11 +795,10 @@ int llclose(int showStatistics)
             {
                 continue;
             }
-            // printf("Read byte: 0x%02X\n", curr_byte);
             result = proccessCtrlByte(&sm, ADDRESS_RX, DISC, curr_byte, readbuf, &bufferPosition);
         }
 
-        if (!result)
+        if(result ==0)
         {
             printf("DISC received\n");
             alarm(0);
