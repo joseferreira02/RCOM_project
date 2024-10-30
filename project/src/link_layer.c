@@ -21,7 +21,6 @@
 #define ESCFLAG 0X5E
 #define ESCESC 0X5D
 
-
 #define ANSWER 0X00
 
 #define ADDRESS_RX 0X01
@@ -74,8 +73,8 @@ void resetAlarm()
 // returns 1 if BCC2 is correct
 int checkBCC2(unsigned char message[], int charsRead, unsigned char bcc2_byte)
 {
-    unsigned char BCC2;
-    for (int i = 0; i < charsRead; i++)
+    unsigned char BCC2 = 0x00;
+    for (int i = 0; i <= charsRead; i++)
     {
         BCC2 ^= message[i];
     }
@@ -110,78 +109,50 @@ void transition(StateMachine *sm, StateType newState)
     sm->currentState = newState;
 }
 
-int proccessInfoByte(StateMachine *sm, StateType address, StateType control, unsigned char curr_byte, unsigned char buffer[], int *bufferPosition, unsigned char message[], int *charsRead)
+int proccessInfoByte(StateMachine *sm, StateType address, unsigned char control, unsigned char curr_byte, unsigned char **buffer, int *bufferPosition, unsigned char **message, int *charsRead)
 {
     // Array of possible RR and REJ control bytes
     switch (sm->currentState)
     {
-
-
-        case START_STATE:
-            *bufferPosition = 0; // Reset buffer position at the start
-            if (curr_byte == FLAG)
-            {
-                buffer[(*bufferPosition)++] = curr_byte; // Store FLAG
-                transition(sm, FLAG_RCV);
-            }
-            break;
-
-        case FLAG_RCV:
-            if (curr_byte == address)
-            {
-                buffer[(*bufferPosition)++] = curr_byte; // Store ADDRESS_RX
-                transition(sm, A_RCV);
-            }
-            else if (curr_byte == FLAG)
-            {
-                *bufferPosition = 0;                     // Reset buffer position when a new FLAG is received
-                buffer[(*bufferPosition)++] = curr_byte; // Store FLAG
-                transition(sm, FLAG_RCV);
-            }
-            else
-            {
-                transition(sm, START_STATE);
-            }
-            break;
-
-        case A_RCV:
-
-            if (curr_byte == control)
-            {
-                buffer[(*bufferPosition)++] = curr_byte; // Store CONTROL
-                transition(sm, C_RCV);
-            }
-            else if (curr_byte == FLAG)
-            {
-                *bufferPosition = 0;                     // Reset buffer position when a new FLAG is received
-                buffer[(*bufferPosition)++] = curr_byte; // Store FLAG
-                transition(sm, FLAG_RCV);
-            }
-            else if (curr_byte)
-            {
-                transition(sm, START_STATE);
-            }
-            break;
-
-    case C_RCV:
-        if (curr_byte == C0 || curr_byte == C1)
+    case BCC_RCV:
+        transition(sm, INFO_STATE);
+        break;
+    case START_STATE:
+        printf("State: START_STATE\n");
+        *bufferPosition = 0; // Reset buffer position at the start
+        if (curr_byte == FLAG)
         {
-            if (curr_byte == sequenceChar)
+            (*bufferPosition)++;
+            *buffer = (unsigned char *)realloc(*buffer, *bufferPosition);
+            if (*buffer == NULL)
             {
-                isRepeated = TRUE;
+                printf("Memory allocation failed\n");
+                exit(-1);
             }
-            else
+            (*buffer)[(*bufferPosition) - 1] = curr_byte;
+            transition(sm, FLAG_RCV);
+        }
+        break;
+
+    case FLAG_RCV:
+        printf("State: FLAG_RCV\n");
+        if (curr_byte == address)
+        {
+            (*bufferPosition)++;
+            *buffer = (unsigned char *)realloc(*buffer, *bufferPosition);
+            
+            if (*buffer == NULL)
             {
-                isRepeated = FALSE;
+                printf("Memory allocation failed\n");
+                exit(-1);
             }
-            buffer[(*bufferPosition)++] = curr_byte;
-            sequenceChar = curr_byte;
-            transition(sm, INFO_STATE);
+        
+            (*buffer)[(*bufferPosition) - 1] = curr_byte;
+            transition(sm, A_RCV);
         }
         else if (curr_byte == FLAG)
         {
-            *bufferPosition = 0;                     // Reset buffer position when a new FLAG is received
-            buffer[(*bufferPosition)++] = curr_byte; // Store FLAG
+
             transition(sm, FLAG_RCV);
         }
         else
@@ -190,67 +161,224 @@ int proccessInfoByte(StateMachine *sm, StateType address, StateType control, uns
         }
         break;
 
-    case BCC_RCV:
-        if (curr_byte == FLAG)
+    case A_RCV:
+        printf("State: A_RCV\n");
+        if (curr_byte == C0 || curr_byte == C1)
         {
-            buffer[(*bufferPosition)++] = curr_byte; // Store FLAG
-            transition(sm, INFO_STATE);
+            if (curr_byte == sequenceChar)
+            {
+                isRepeated = TRUE;
+            }
+            else
+            {
+                sequenceChar = curr_byte;
+                isRepeated = FALSE;
+            }
+            (*bufferPosition)++;
+            *buffer = (unsigned char *)realloc(*buffer, *bufferPosition);
+            if (*buffer == NULL)
+            {
+                printf("Memory allocation failed\n");
+                exit(-1);
+            }
+            (*buffer)[(*bufferPosition) - 1] = curr_byte;
+            transition(sm, C_RCV);
+        }
+        else if (curr_byte == FLAG)
+        {
+
+            transition(sm, FLAG_RCV);
         }
         else
         {
             transition(sm, START_STATE);
         }
         break;
+    case C_RCV:
+        printf("State: C_RCV\n");
+
+
+
+        if (curr_byte == ((*buffer)[1] ^ (*buffer)[2]))
+        {
+            (*bufferPosition)++;
+            *buffer = (unsigned char *)realloc(*buffer, *bufferPosition);
+            if (*buffer == NULL)
+            {
+                printf("Memory allocation failed\n");
+                exit(-1);
+            }
+            (*buffer)[(*bufferPosition) - 1] = curr_byte;
+            transition(sm, INFO_STATE);
+        }
+        else if (curr_byte == FLAG)
+        {
+            transition(sm, FLAG_RCV);
+        }
+        else
+        {
+            transition(sm, START_STATE);
+        }
+        break;
+
     case INFO_STATE:
+        printf("State: INFO_STATE\n");
+        if ((curr_byte != ESCFLAG && curr_byte != ESCESC) && escCheck)
+        {
+            (*bufferPosition)++;
+            *buffer = (unsigned char *)realloc(*buffer, *bufferPosition);
+            if (*buffer == NULL)
+            {
+                printf("Memory allocation failed\n");
+                exit(-1);
+            }
+            (*buffer)[(*bufferPosition) - 1] = ESC;
+
+            (*charsRead)++;
+            *message = (unsigned char *)realloc(*message, *charsRead);
+            if (*message == NULL)
+            {
+                printf("Memory allocation failed\n");
+                exit(-1);
+            }
+            (*message)[(*charsRead) - 1] = ESC;
+            escCheck = FALSE;
+        }
         switch (curr_byte)
         {
         case FLAG:
-            if(!escCheck)transition(sm, STOP_STATE);
+            if (!escCheck)
+                transition(sm, STOP_STATE);
             break;
         case ESCFLAG:
             if (escCheck)
             {
-                buffer[(*bufferPosition)++] = FLAG;
-                message[(*charsRead)++] = FLAG;
+                (*bufferPosition)++;
+                *buffer = (unsigned char *)realloc(*buffer, *bufferPosition);
+                if (*buffer == NULL)
+                {
+                    printf("Memory allocation failed\n");
+                    exit(-1);
+                }
+                (*buffer)[(*bufferPosition) - 1] = FLAG;
+
+                (*charsRead)++;
+                *message = (unsigned char *)realloc(*message, *charsRead);
+                if (*message == NULL)
+                {
+                    printf("Memory allocation failed\n");
+                    exit(-1);
+                }
+                (*message)[(*charsRead) - 1] = FLAG;
+
                 escCheck = FALSE;
             }
             else
             {
-                escCheck = TRUE;
+
+                (*bufferPosition)++;
+                *buffer = (unsigned char *)realloc(*buffer, *bufferPosition);
+                if (*buffer == NULL)
+                {
+                    printf("Memory allocation failed\n");
+                    exit(-1);
+                }
+                (*buffer)[(*bufferPosition) - 1] = ESCFLAG;
+
+                (*charsRead)++;
+                *message = (unsigned char *)realloc(*message, *charsRead);
+                if (*message == NULL)
+                {
+                    printf("Memory allocation failed\n");
+                    exit(-1);
+                }
+                (*message)[(*charsRead) - 1] = ESCFLAG;
+
+                escCheck = FALSE;
             }
             break;
         case ESCESC:
             if (escCheck)
             {
-                buffer[(*bufferPosition)++] = ESC;
-                message[(*charsRead)++] = ESC;
+                (*bufferPosition)++;
+                *buffer = (unsigned char *)realloc(*buffer, *bufferPosition);
+                if (*buffer == NULL)
+                {
+                    printf("Memory allocation failed\n");
+                    exit(-1);
+                }
+                (*buffer)[(*bufferPosition) - 1] = ESC;
+
+                (*charsRead)++;
+                *message = (unsigned char *)realloc(*message, *charsRead);
+                if (*message == NULL)
+                {
+                    printf("Memory allocation failed\n");
+                    exit(-1);
+                }
+                (*message)[(*charsRead) - 1] = ESC;
+
                 escCheck = FALSE;
             }
             else
             {
-                escCheck = TRUE;
-            }
+                (*bufferPosition)++;
+                *buffer = (unsigned char *)realloc(*buffer, *bufferPosition);
+                if (*buffer == NULL)
+                {
+                    printf("Memory allocation failed\n");
+                    exit(-1);
+                }
+                (*buffer)[(*bufferPosition) - 1] = ESCESC;
 
+                (*charsRead)++;
+                *message = (unsigned char *)realloc(*message, *charsRead);
+                if (*message == NULL)
+                {
+                    printf("Memory allocation failed\n");
+                    exit(-1);
+                }
+                (*message)[(*charsRead) - 1] = ESCESC;
+                escCheck = FALSE;
+            }
             break;
         case ESC:
             escCheck = TRUE;
             break;
         default:
-            buffer[(*bufferPosition)++] = curr_byte; // Store FLAG
-            message[(*charsRead)++] = curr_byte;
+            (*bufferPosition)++;
+            *buffer = (unsigned char *)realloc(*buffer, *bufferPosition);
+            if (*buffer == NULL)
+            {
+                printf("Memory allocation failed\n");
+                exit(-1);
+            }
+            (*buffer)[(*bufferPosition) - 1] = curr_byte;
+
+            (*charsRead)++;
+            *message = (unsigned char *)realloc(*message, *charsRead);
+            if (*message == NULL)
+            {
+                printf("Memory allocation failed\n");
+                exit(-1);
+            }
+            (*message)[(*charsRead) - 1] = curr_byte;
             break;
         }
         break;
+
     case STOP_STATE:
+        printf("State: STOP_STATE\n");
         // checks condition
-        isValid = checkBCC2(message, *charsRead - 2, buffer[(*bufferPosition) - 1]);
+
+        isValid = checkBCC2(*message, (*charsRead) - 2, (*buffer)[(*bufferPosition)-1]);
         return 0;
         break;
     }
     return -1;
 }
 
-int proccessCtrlByte(StateMachine *sm, StateType address, StateType control, unsigned char curr_byte, unsigned char buffer[], int *bufferPosition)
+int proccessCtrlByte(StateMachine *sm, StateType address, unsigned char control, unsigned char curr_byte, unsigned char buffer[], int *bufferPosition)
 {
     switch (sm->currentState)
     {
@@ -284,7 +412,7 @@ int proccessCtrlByte(StateMachine *sm, StateType address, StateType control, uns
 
     case A_RCV:
 
-        if (curr_byte == control || (((curr_byte == RR0) || (curr_byte == RR1) || (curr_byte == REJ0) || (curr_byte == REJ1))  && control == ANSWER) ) // curr_byte == (RR0 || RR1 || REJ0 || REJ1)
+        if (curr_byte == control || (((curr_byte == RR0) || (curr_byte == RR1) || (curr_byte == REJ0) || (curr_byte == REJ1)) && control == ANSWER)) // curr_byte == (RR0 || RR1 || REJ0 || REJ1)
         {
             buffer[(*bufferPosition)++] = curr_byte; // Store CONTROL
             transition(sm, C_RCV);
@@ -318,29 +446,31 @@ int proccessCtrlByte(StateMachine *sm, StateType address, StateType control, uns
             transition(sm, START_STATE);
         }
         break;
- 
 
-        case BCC_RCV:
-            if (curr_byte == FLAG)
-            {
-                
-                buffer[(*bufferPosition)++] = curr_byte; // Store FLAG
-                transition(sm, STOP_STATE);
-                return 0;
-            }
-            else
-            {
-                transition(sm, START_STATE);
-            }
-            break;
+    case BCC_RCV:
+        if (curr_byte == FLAG)
+        {
 
-        case STOP_STATE:{
-            // Access control byte
-            unsigned char access_control = buffer[2];
+            buffer[(*bufferPosition)++] = curr_byte; // Store FLAG
+            transition(sm, STOP_STATE);
+            return 0;
+        }
+        else
+        {
+            transition(sm, START_STATE);
+        }
+        break;
 
-            if (access_control == 0xAA || access_control == 0xAB) return RR_RECEIVED;
-            else if (access_control == 0x54 || access_control == 0x55) return REJ_RECEIVED; 
-            }
+    case STOP_STATE:
+    {
+        // Access control byte
+        unsigned char access_control = buffer[2];
+
+        if (access_control == 0xAA || access_control == 0xAB)
+            return RR_RECEIVED;
+        else if (access_control == 0x54 || access_control == 0x55)
+            return REJ_RECEIVED;
+    }
 
     default:
         break;
@@ -365,22 +495,22 @@ void buildCtrlWord(unsigned char address, unsigned char control)
         printf("Error opening bytes\n");
         exit(-1);
     }
-
 }
 
-
-unsigned char* byteStuffing(const unsigned char *frame, int frameSize, int *stuffedSize){
+unsigned char *byteStuffing(const unsigned char *frame, int frameSize, int *stuffedSize)
+{
 
     // Allocate memory for the worst case possible
-    unsigned char *stuffedData = (unsigned char *)malloc(2*frameSize-2);
-    if (stuffedData == NULL){
+    unsigned char *stuffedData = (unsigned char *)malloc(2 * frameSize - 2);
+    if (stuffedData == NULL)
+    {
         printf("Memory allocation failed\n");
         *stuffedSize = -1;
         exit(-1);
     }
 
     int j = 0; // Index for stuf
-    
+
     // First 4 bytes shouldn't be stuffed (FLAG, ADDRESS, CONTROL, BCC)
     stuffedData[j++] = frame[0];
     stuffedData[j++] = frame[1];
@@ -388,29 +518,35 @@ unsigned char* byteStuffing(const unsigned char *frame, int frameSize, int *stuf
     stuffedData[j++] = frame[3];
 
     // Apply byte stuffing to the data section
-    for (int i = 4; i < frameSize-2; i++){
-        if (frame[i] == FLAG){
+    for (int i = 4; i < frameSize - 2; i++)
+    {
+        if (frame[i] == FLAG)
+        {
             stuffedData[j++] = ESC;
             stuffedData[j++] = 0x5E;
         }
-        else if (frame[i] == ESC){
+        else if (frame[i] == ESC)
+        {
             stuffedData[j++] = ESC;
             stuffedData[j++] = 0x5D;
         }
-        else stuffedData[j++] = frame[i];
+        else
+            stuffedData[j++] = frame[i];
     }
 
     // Last 2 bytes shouldn't be stuffed (BCC2, FLAG)
-    stuffedData[j++] = frame[frameSize-2];
-    stuffedData[j++] = frame[frameSize-1];
+    stuffedData[j++] = frame[frameSize - 2];
+    stuffedData[j++] = frame[frameSize - 1];
     *stuffedSize = j; // Update the size of the stuffed data
     return stuffedData;
 }
 
-unsigned char* createIFrame(const unsigned char *buf, int bufSize, int* stuffedSize){
+unsigned char *createIFrame(const unsigned char *buf, int bufSize, int *stuffedSize)
+{
     // Dynamically allocate memory for the frame
     unsigned char *frame = (unsigned char *)malloc(CTRL_BUF_SIZE + bufSize + 2);
-    if (frame == NULL) {
+    if (frame == NULL)
+    {
         printf("Memory allocation failed\n");
         return NULL; // Return error if memory allocation fails
     }
@@ -419,16 +555,18 @@ unsigned char* createIFrame(const unsigned char *buf, int bufSize, int* stuffedS
     frame[0] = FLAG;
     frame[1] = ADDRESS_TX;
     frame[2] = sequenceNumber ? 0x80 : 0x00; // Sequence number (Ns = 0 or 1)
-    frame[3] = frame[1]^frame[2];
+    frame[3] = frame[1] ^ frame[2];
 
     // Copy data to the frame
-    for (int i = 0; i < bufSize; i++){
+    for (int i = 0; i < bufSize; i++)
+    {
         frame[4 + i] = buf[i];
     }
 
     // Calculate BCC2
     unsigned char BCC2 = 0;
-    for (int i = 0; i < bufSize; i++){
+    for (int i = 0; i < bufSize; i++)
+    {
         BCC2 ^= buf[i];
     }
 
@@ -437,7 +575,8 @@ unsigned char* createIFrame(const unsigned char *buf, int bufSize, int* stuffedS
 
     // Apply byte stuffing
     unsigned char *stuffedFrame = byteStuffing(frame, CTRL_BUF_SIZE + bufSize + 2, stuffedSize);
-    if (stuffedFrame == NULL){
+    if (stuffedFrame == NULL)
+    {
         printf("ERROR: Couldn't perform byte stuffing\n");
         free(frame);
         exit(-1);
@@ -556,7 +695,7 @@ int llwrite(const unsigned char *buf, int bufSize)
 {
 
     int stuffedSize = 0;
-    unsigned char* stuffedFrame = createIFrame(buf, bufSize, &stuffedSize);
+    unsigned char *stuffedFrame = createIFrame(buf, bufSize, &stuffedSize);
 
     (void)signal(SIGALRM, alarmHandler);
 
@@ -572,9 +711,11 @@ int llwrite(const unsigned char *buf, int bufSize)
     int bytesSent = 0;
 
     // Retransmission logic
-    while (alarmCount < cp.nRetransmissions && result < 0){
+    while (alarmCount < cp.nRetransmissions && result < 0)
+    {
 
-        if(alarmEnabled == FALSE){
+        if (alarmEnabled == FALSE)
+        {
             // Send the frame
             bytesSent = writeBytesSerialPort(stuffedFrame, stuffedSize);
             printf("Sent I Frame\n");
@@ -590,7 +731,8 @@ int llwrite(const unsigned char *buf, int bufSize)
             printf("error\n");
             exit(-1);
         }
-        if (readBytes == 0) continue;
+        if (readBytes == 0)
+            continue;
 
         printf("Read byte: 0x%02X\n", curr_byte);
 
@@ -598,13 +740,15 @@ int llwrite(const unsigned char *buf, int bufSize)
         // Process the acceptance or rejection frame sent back by the receiver
         result = proccessCtrlByte(&sm, ADDRESS_RX, UA, curr_byte, ackFrame, &bufferPosition);
 
-        if (result == RR_RECEIVED){
+        if (result == RR_RECEIVED)
+        {
             printf("Acknowledgement received\n");
             alarm(0);
             sequenceNumber = (sequenceNumber + 1) % 2; // Update Sequence Number
             break;
         }
-        else if (result == REJ_RECEIVED){
+        else if (result == REJ_RECEIVED)
+        {
             printf("Frame rejected. Retransmiting...\n");
             alarmEnabled = FALSE;
             alarmCount++;
@@ -625,14 +769,30 @@ int llwrite(const unsigned char *buf, int bufSize)
 ////////////////////////////////////////////////
 int llread(unsigned char *packet)
 {
+    //unsigned char *buffer = (unsigned char *)malloc(1); // Initialize buffer
+    //if (buffer == NULL)
+    //{
+    //    printf("Memory allocation failed\n");
+    //    exit(-1);
+    //}
+    //unsigned char *message = (unsigned char *)malloc(1); // Initialize message
+    //if (message == NULL)
+    //{
+    //    printf("Memory allocation failed\n");
+    //    exit(-1);
+    //}
     StateMachine sm;
     sm.currentState = START_STATE;
     unsigned char curr_byte;
-    unsigned char buffer[5];
-    int bufferPosition = 0;
+    unsigned char *buffer = (unsigned char *)malloc(1); // Initialize buffer
+    if (buffer == NULL)
+    {
+        printf("Memory allocation failed\n");
+        exit(-1);
+    }    int bufferPosition = 0;
 
     // message
-    unsigned char message[5];
+    unsigned char *message = NULL; // Increase message size to prevent overflow
     int charsRead = 0;
     isValid = FALSE;
     isRepeated = FALSE;
@@ -652,7 +812,9 @@ int llread(unsigned char *packet)
         }
         printf("Read byte: 0x%02X\n", curr_byte);
 
-    } while (proccessInfoByte(&sm, ADDRESS_TX, sequenceNumber, curr_byte, buffer, &bufferPosition, message, &charsRead) != 0);
+    } while (proccessInfoByte(&sm, ADDRESS_TX, sequenceNumber, curr_byte, &buffer, &bufferPosition, &message, &charsRead) != 0);
+
+    printf("Number of bytes read: %d\n", charsRead-1);
 
     // Send RR|REJ
     if (isValid && isRepeated)
@@ -663,6 +825,21 @@ int llread(unsigned char *packet)
     if (isValid && !isRepeated)
     {
         sequenceNumber == 1 ? buildCtrlWord(ADDRESS_RX, RR0) : buildCtrlWord(ADDRESS_RX, RR1);
+        //saves packet
+        packet = (unsigned char *)malloc(charsRead-1);
+        if (packet == NULL)
+        {
+            printf("Memory allocation failed\n");
+            exit(-1);
+        }
+        
+        //printf("SAVING PACKET\n");
+        for (int i = 0; i < charsRead-1; i++)
+        {
+            packet[i] = message[i];
+        }
+
+
         printf("CORRECT RR SENT\n");
     }
     if (!isValid)
@@ -707,8 +884,6 @@ int llclose(int showStatistics)
             // printf("Read byte: 0x%02X\n", curr_byte);
         } while (proccessCtrlByte(&sm, ADDRESS_TX, DISC, curr_byte, buf, &bufferPosition) != 0);
         printf("DISC received\n");
-
-        
 
         // reset buffer/sm
         bufferPosition = 0;
@@ -801,7 +976,7 @@ int llclose(int showStatistics)
             result = proccessCtrlByte(&sm, ADDRESS_RX, DISC, curr_byte, readbuf, &bufferPosition);
         }
 
-        if(result ==0)
+        if (result == 0)
         {
             printf("DISC received\n");
             alarm(0);
