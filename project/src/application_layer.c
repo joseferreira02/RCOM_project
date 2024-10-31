@@ -1,4 +1,4 @@
-/*// Application layer protocol implementation
+// Application layer protocol implementation
 
 #include "application_layer.h"
 #include "link_layer.h"
@@ -138,11 +138,11 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
         return;
     }
 
-}*/
+}
 
 
 
-
+/*
 // Minimal Application Layer to test llopen, llwrite, and llclose
 
 #include "application_layer.h"
@@ -171,7 +171,7 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate, in
     }
 
     // Transmitter (Tx) will send mock data
-    if (connectionParameters.role == LlTx) {
+     if (connectionParameters.role == LlTx) {
         // Create a mock data array to send
         unsigned char mockData[MOCK_DATA_SIZE];
         for (int i = 0; i < MOCK_DATA_SIZE; i++) {
@@ -184,7 +184,7 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate, in
         } else {
             printf("Mock data sent successfully.\n");
         }
-    }
+     }
     // Receiver (Rx) would read the data here, if necessary
     else if (connectionParameters.role == LlRx) {
         printf("Waiting to receive data with llread...\n");
@@ -210,3 +210,4 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate, in
         printf("Connection closed successfully.\n");
     }
 }
+*/
