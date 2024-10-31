@@ -10,10 +10,7 @@
 #include <string.h>
 #include <string.h>
 
-
-    int degub = FALSE;
-
-
+int totalPacketREad = 0;
 // MISC
 #define _POSIX_SOURCE 1 // POSIX compliant source
 
@@ -712,7 +709,7 @@ int llwrite(const unsigned char *buf, int bufSize)
             // Send the frame
             bytesSent = writeBytesSerialPort(stuffedFrame, stuffedSize);
             printf("Sent I Frame\n");
-
+            printf("BCC2: 0x%02X\n", stuffedFrame[stuffedSize - 3]);
             // Start timer
             alarm(cp.timeout);
             alarmEnabled = TRUE;
@@ -728,7 +725,7 @@ int llwrite(const unsigned char *buf, int bufSize)
         if (readBytes == 0)
             continue;
 
-        printf("Read byte: 0x%02X\n", curr_byte);
+        //printf("Read byte: 0x%02X\n", curr_byte);
 
         // State Machine processing
         // Process the acceptance or rejection frame sent back by the receiver
@@ -740,16 +737,16 @@ int llwrite(const unsigned char *buf, int bufSize)
             {
                 printf("Repeated frame. Retransmiting...\n");
 
-                alarmEnabled = FALSE;
-                alarmCount++;
-
                 // SET UP STATE MACHINE AND BUFFER
                 sm.currentState = START_STATE;
+                
 
                 // Wait for acknowledgment frame (RR or REJ)
                 bufferPosition = 0;
                 result = -1;
                 bytesSent = 0;
+
+                alarmEnabled = FALSE;
 
                 continue;
             }
@@ -764,7 +761,7 @@ int llwrite(const unsigned char *buf, int bufSize)
             {
                 printf("Frame rejected. Retransmiting...\n");
                 alarmEnabled = FALSE;
-                alarmCount++;
+                
 
                 // reset variables
 
@@ -807,6 +804,12 @@ int llwrite(const unsigned char *buf, int bufSize)
             return -1;
         }
         */
+
+    if(alarmCount >= cp.nRetransmissions)
+    {
+        printf("Maximum retransmissions reached. Exiting...\n");
+        exit(-1);
+    }
     free(stuffedFrame);
     return bytesSent;
 }
@@ -830,7 +833,13 @@ int llread(unsigned char *packet)
     int bufferPosition = 0;
 
     // message
-    unsigned char *message = NULL; // Increase message size to prevent overflow
+    unsigned char *message = (unsigned char *)malloc(1); // Initialize buffer
+        if (message == NULL)
+    {
+        printf("Memory allocation failed\n");
+        exit(-1);
+    }
+
     int charsRead = 0;
     isValid = FALSE;
     isRepeated = FALSE;
@@ -852,8 +861,10 @@ int llread(unsigned char *packet)
 
     } while (processInfoByte(&sm, ADDRESS_TX, sequenceNumber, curr_byte, &buffer, &bufferPosition, &message, &charsRead) != 0);
 
+
     printf("Number of bytes read: %d\n", charsRead - 1);
 
+    printf("BCC2: 0x%02X\n", message[charsRead - 1]);
     // Send RR|REJ
     if (isValid && isRepeated)
     {
@@ -874,34 +885,28 @@ int llread(unsigned char *packet)
             packet[i] = message[i];
         }
 
-        if (degub)
-        {
-            for (int i = 0; i < 10; i++)
-            {
-                printf("Message byte : 0x%02X\n", message[i]);
-            }
-            degub = FALSE;
-        }
+        totalPacketREad++;
+
         printf("CORRECT RR SENT\n");
     }
     if (!isValid)
     {
         sequenceNumber == 0 ? buildCtrlWord(ADDRESS_RX, REJ0) : buildCtrlWord(ADDRESS_RX, REJ1);
-
-        for (int i = 0; i < 10; i++)
-        {
-            printf("Message byte : 0x%02X\n", message[i]);
-        }
-        degub = TRUE;
-
+        /*
+                for (int i = 0; i < 10; i++)
+                {
+                    printf("Message byte : 0x%02X\n", message[i]);
+                }
+                degub = TRUE;
+        */
         printf("REJ SENT\n");
     }
-
     bytesRead += charsRead - 1;
     free(message);
     free(buffer);
     printf("Sequence Number: %d\n", sequenceNumber);
 
+    printf("--------------------------\n");
     return charsRead - 1;
 }
 // rr0 and se
@@ -1050,6 +1055,7 @@ int llclose(int showStatistics)
     {
         printf("---- Statistics ----\n");
         printf("Bytes transmitted: %ld\n", bytesRead);
+        printf("PACKET READ : %d\n", totalPacketREad);
         printf("--------------------\n");
     }
 
