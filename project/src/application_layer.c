@@ -1,4 +1,4 @@
-// Application layer protocol implementation
+/*// Application layer protocol implementation
 
 #include "application_layer.h"
 #include "link_layer.h"
@@ -55,6 +55,8 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
         return;
     }
 
+
+    printf("--------------LLWRITE--------------\n");
     FILE *file = NULL;
 
     // If the role is LlTx, send data
@@ -136,4 +138,75 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
         return;
     }
 
+}*/
+
+
+
+
+// Minimal Application Layer to test llopen, llwrite, and llclose
+
+#include "application_layer.h"
+#include "link_layer.h"
+#include <string.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+#define MOCK_DATA_SIZE 100 // Size of mock data array
+
+void applicationLayer(const char *serialPort, const char *role, int baudRate, int nTries, int timeout, const char *filename) {
+    LinkLayer connectionParameters;
+
+    // Set up link layer connection parameters
+    strcpy(connectionParameters.serialPort, serialPort);
+    connectionParameters.baudRate = baudRate;
+    connectionParameters.nRetransmissions = nTries;
+    connectionParameters.timeout = timeout;
+    connectionParameters.role = (strcmp(role, "tx") == 0) ? LlTx : LlRx;
+
+    printf("Opening connection with llopen...\n");
+    // Initialize the connection
+    if (llopen(connectionParameters) < 0) {
+        printf("ERROR: Failed to open link layer connection.\n");
+        return;
+    }
+
+    // Transmitter (Tx) will send mock data
+    if (connectionParameters.role == LlTx) {
+        // Create a mock data array to send
+        unsigned char mockData[MOCK_DATA_SIZE];
+        for (int i = 0; i < MOCK_DATA_SIZE; i++) {
+            mockData[i] = (unsigned char)(i % 256); // Fill array with sample data
+        }
+
+        printf("Sending mock data with llwrite...\n");
+        if (llwrite(mockData, MOCK_DATA_SIZE) < 0) {
+            printf("ERROR: Failed to send data with llwrite.\n");
+        } else {
+            printf("Mock data sent successfully.\n");
+        }
+    }
+    // Receiver (Rx) would read the data here, if necessary
+    else if (connectionParameters.role == LlRx) {
+        printf("Waiting to receive data with llread...\n");
+        unsigned char receiveBuffer[MOCK_DATA_SIZE];
+        int bytesRead = llread(receiveBuffer);
+        
+        if (bytesRead < 0) {
+            printf("ERROR: Failed to read data with llread.\n");
+        } else {
+            printf("Received %d bytes:\n", bytesRead);
+            for (int i = 0; i < bytesRead; i++) {
+                printf("%02X ", receiveBuffer[i]);
+            }
+            printf("\n");
+        }
+    }
+
+    printf("Closing connection with llclose...\n");
+    // Close the connection
+    if (llclose(1) < 0) {
+        printf("ERROR: Failed to close link layer connection.\n");
+    } else {
+        printf("Connection closed successfully.\n");
+    }
 }
