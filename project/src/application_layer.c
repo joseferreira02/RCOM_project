@@ -28,7 +28,6 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
     }
 
     /*
-
     printf("--------------LLWRITE-------------\n");
     unsigned char testData[] = {0x01, 0x02, 0x03, 0x04}; // Test data buffer
     int bufSize = sizeof(testData);
@@ -42,7 +41,7 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
             printf("Failed to send data.\n");
         }
     }
-*/
+    */
 
     unsigned char buffer[16] = {
         0x7E,                  // Start byte
@@ -56,6 +55,7 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
         // BCC2 (XOR of all payload bytes)
         0x11,
         
+        
         0x7E                   // End byte
     };
 
@@ -66,7 +66,7 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
     printf("--------------LLREAD--------------\n");
     // If the role is LlRx, receive data
     if (connectionParameters.role == LlRx) {
-        unsigned char receiveBuffer[1024];
+        unsigned char receiveBuffer[1024] = {0};
         int bytesRead = llread(receiveBuffer);
         if (bytesRead > 0) {
             printf("Received %d bytes:\n", bytesRead);
@@ -79,14 +79,14 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
         }
     }
 
-    /*
+
 
     if (llclose(1) < 0)
     {
         printf("Error: Failed to close link layer connection.\n");
         return;
     }
-    */
+    
 
 }
 

@@ -46,6 +46,8 @@ int isValid = FALSE;
 int isRepeated = FALSE;
 static int escCheck = FALSE;
 
+long int bytesRead = 0;
+
 // C
 // 00000000 / 0x00 Information frame number 0
 // 10000000 / 0x80 Information frame number 1
@@ -109,7 +111,7 @@ void transition(StateMachine *sm, StateType newState)
     sm->currentState = newState;
 }
 
-int proccessInfoByte(StateMachine *sm, StateType address, unsigned char control, unsigned char curr_byte, unsigned char **buffer, int *bufferPosition, unsigned char **message, int *charsRead)
+int processInfoByte(StateMachine *sm, StateType address, unsigned char control, unsigned char curr_byte, unsigned char **buffer, int *bufferPosition, unsigned char **message, int *charsRead)
 {
     // Array of possible RR and REJ control bytes
     switch (sm->currentState)
@@ -118,7 +120,6 @@ int proccessInfoByte(StateMachine *sm, StateType address, unsigned char control,
         transition(sm, INFO_STATE);
         break;
     case START_STATE:
-        printf("State: START_STATE\n");
         *bufferPosition = 0; // Reset buffer position at the start
         if (curr_byte == FLAG)
         {
@@ -135,18 +136,17 @@ int proccessInfoByte(StateMachine *sm, StateType address, unsigned char control,
         break;
 
     case FLAG_RCV:
-        printf("State: FLAG_RCV\n");
         if (curr_byte == address)
         {
             (*bufferPosition)++;
             *buffer = (unsigned char *)realloc(*buffer, *bufferPosition);
-            
+
             if (*buffer == NULL)
             {
                 printf("Memory allocation failed\n");
                 exit(-1);
             }
-        
+
             (*buffer)[(*bufferPosition) - 1] = curr_byte;
             transition(sm, A_RCV);
         }
@@ -162,7 +162,6 @@ int proccessInfoByte(StateMachine *sm, StateType address, unsigned char control,
         break;
 
     case A_RCV:
-        printf("State: A_RCV\n");
         if (curr_byte == C0 || curr_byte == C1)
         {
             if (curr_byte == sequenceChar)
@@ -195,9 +194,6 @@ int proccessInfoByte(StateMachine *sm, StateType address, unsigned char control,
         }
         break;
     case C_RCV:
-        printf("State: C_RCV\n");
-
-
 
         if (curr_byte == ((*buffer)[1] ^ (*buffer)[2]))
         {
@@ -222,7 +218,6 @@ int proccessInfoByte(StateMachine *sm, StateType address, unsigned char control,
         break;
 
     case INFO_STATE:
-        printf("State: INFO_STATE\n");
         if ((curr_byte != ESCFLAG && curr_byte != ESCESC) && escCheck)
         {
             (*bufferPosition)++;
@@ -368,17 +363,16 @@ int proccessInfoByte(StateMachine *sm, StateType address, unsigned char control,
         break;
 
     case STOP_STATE:
-        printf("State: STOP_STATE\n");
         // checks condition
 
-        isValid = checkBCC2(*message, (*charsRead) - 2, (*buffer)[(*bufferPosition)-1]);
+        isValid = checkBCC2(*message, (*charsRead) - 2, (*buffer)[(*bufferPosition) - 1]);
         return 0;
         break;
     }
     return -1;
 }
 
-int proccessCtrlByte(StateMachine *sm, StateType address, unsigned char control, unsigned char curr_byte, unsigned char buffer[], int *bufferPosition)
+int processCtrlByte(StateMachine *sm, StateType address, unsigned char control, unsigned char curr_byte, unsigned char buffer[], int *bufferPosition)
 {
     switch (sm->currentState)
     {
@@ -625,7 +619,7 @@ int llopen(LinkLayer connectionParameters)
                 continue;
             }
             // printf("Read byte: 0x%02X\n", curr_byte);
-        } while (proccessCtrlByte(&sm, ADDRESS_TX, SET, curr_byte, buf, &bufferPosition) != 0);
+        } while (processCtrlByte(&sm, ADDRESS_TX, SET, curr_byte, buf, &bufferPosition) != 0);
 
         printf("SET received\n");
         buildCtrlWord(ADDRESS_RX, UA);
@@ -671,7 +665,7 @@ int llopen(LinkLayer connectionParameters)
 
             // printf("Read byte: 0x%02X\n", curr_byte);
 
-            result = proccessCtrlByte(&sm, ADDRESS_RX, UA, curr_byte, readbuf, &bufferPosition);
+            result = processCtrlByte(&sm, ADDRESS_RX, UA, curr_byte, readbuf, &bufferPosition);
         }
         if (alarmCount == connectionParameters.nRetransmissions)
         {
@@ -738,7 +732,7 @@ int llwrite(const unsigned char *buf, int bufSize)
 
         // State Machine processing
         // Process the acceptance or rejection frame sent back by the receiver
-        result = proccessCtrlByte(&sm, ADDRESS_RX, UA, curr_byte, ackFrame, &bufferPosition);
+        result = processCtrlByte(&sm, ADDRESS_RX, UA, curr_byte, ackFrame, &bufferPosition);
 
         if (result == RR_RECEIVED)
         {
@@ -769,18 +763,7 @@ int llwrite(const unsigned char *buf, int bufSize)
 ////////////////////////////////////////////////
 int llread(unsigned char *packet)
 {
-    //unsigned char *buffer = (unsigned char *)malloc(1); // Initialize buffer
-    //if (buffer == NULL)
-    //{
-    //    printf("Memory allocation failed\n");
-    //    exit(-1);
-    //}
-    //unsigned char *message = (unsigned char *)malloc(1); // Initialize message
-    //if (message == NULL)
-    //{
-    //    printf("Memory allocation failed\n");
-    //    exit(-1);
-    //}
+
     StateMachine sm;
     sm.currentState = START_STATE;
     unsigned char curr_byte;
@@ -789,7 +772,8 @@ int llread(unsigned char *packet)
     {
         printf("Memory allocation failed\n");
         exit(-1);
-    }    int bufferPosition = 0;
+    }
+    int bufferPosition = 0;
 
     // message
     unsigned char *message = NULL; // Increase message size to prevent overflow
@@ -797,7 +781,8 @@ int llread(unsigned char *packet)
     isValid = FALSE;
     isRepeated = FALSE;
 
-    // just proccess the byte  + destuffing
+    // just process the byte  + destuffing
+    printf("Processing...\n");
     do
     {
         int readBytes = readByteSerialPort(&curr_byte);
@@ -810,11 +795,10 @@ int llread(unsigned char *packet)
         {
             continue;
         }
-        printf("Read byte: 0x%02X\n", curr_byte);
 
-    } while (proccessInfoByte(&sm, ADDRESS_TX, sequenceNumber, curr_byte, &buffer, &bufferPosition, &message, &charsRead) != 0);
+    } while (processInfoByte(&sm, ADDRESS_TX, sequenceNumber, curr_byte, &buffer, &bufferPosition, &message, &charsRead) != 0);
 
-    printf("Number of bytes read: %d\n", charsRead-1);
+    printf("Number of bytes read: %d\n", charsRead - 1);
 
     // Send RR|REJ
     if (isValid && isRepeated)
@@ -825,20 +809,21 @@ int llread(unsigned char *packet)
     if (isValid && !isRepeated)
     {
         sequenceNumber == 1 ? buildCtrlWord(ADDRESS_RX, RR0) : buildCtrlWord(ADDRESS_RX, RR1);
-        //saves packet
-        packet = (unsigned char *)malloc(charsRead-1);
+        // saves packet
+        packet = (unsigned char *)malloc(charsRead - 1);
+
         if (packet == NULL)
         {
             printf("Memory allocation failed\n");
             exit(-1);
         }
-        
-        //printf("SAVING PACKET\n");
-        for (int i = 0; i < charsRead-1; i++)
+
+        // printf("SAVING PACKET\n");
+        for (int i = 0; i < charsRead - 1; i++)
         {
             packet[i] = message[i];
+            printf("0x%02X ", packet[i]);
         }
-
 
         printf("CORRECT RR SENT\n");
     }
@@ -848,7 +833,12 @@ int llread(unsigned char *packet)
         printf("REJ SENT\n");
     }
 
-    return 0;
+    bytesRead += charsRead - 1;
+    free(message);
+    free(buffer);
+
+
+    return charsRead - 1;
 }
 
 ////////////////////////////////////////////////
@@ -882,7 +872,7 @@ int llclose(int showStatistics)
                 continue;
             }
             // printf("Read byte: 0x%02X\n", curr_byte);
-        } while (proccessCtrlByte(&sm, ADDRESS_TX, DISC, curr_byte, buf, &bufferPosition) != 0);
+        } while (processCtrlByte(&sm, ADDRESS_TX, DISC, curr_byte, buf, &bufferPosition) != 0);
         printf("DISC received\n");
 
         // reset buffer/sm
@@ -919,7 +909,7 @@ int llclose(int showStatistics)
             }
             // printf("Read byte: 0x%02X\n", curr_byte);
 
-            result = proccessCtrlByte(&sm, ADDRESS_TX, UA, curr_byte, buf, &bufferPosition);
+            result = processCtrlByte(&sm, ADDRESS_TX, UA, curr_byte, buf, &bufferPosition);
         }
 
         if (!result)
@@ -973,7 +963,7 @@ int llclose(int showStatistics)
             {
                 continue;
             }
-            result = proccessCtrlByte(&sm, ADDRESS_RX, DISC, curr_byte, readbuf, &bufferPosition);
+            result = processCtrlByte(&sm, ADDRESS_RX, DISC, curr_byte, readbuf, &bufferPosition);
         }
 
         if (result == 0)
@@ -996,7 +986,7 @@ int llclose(int showStatistics)
     if (showStatistics)
     {
         printf("---- Statistics ----\n");
-        printf("EMPTY");
+        printf("Bytes transmitted: %ld\n", bytesRead);
         printf("--------------------\n");
     }
 
