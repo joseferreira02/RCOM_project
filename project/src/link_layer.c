@@ -34,7 +34,7 @@
 
 #define RR0 0xAA
 #define RR1 0xAB
-#define REJ0 0x054
+#define REJ0 0x54
 #define REJ1 0x55
 
 #define RR_RECEIVED 1
