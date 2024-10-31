@@ -81,9 +81,7 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
         unsigned char startPacket[1000];
         int startPacketSize;
         createControlPacket(startPacket, &startPacketSize, 0x01, fileSize, filename);
-        for(int i = 0; i< startPacketSize; i++){
-            printf("0x%02X\n", startPacket[i]);
-        }
+
         llwrite(startPacket, startPacketSize);
 
         // Send data packets
@@ -127,7 +125,6 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
         while (receiving)
         {
             llread(receiveBuffer);
-            printf("0x%02X\n", receiveBuffer[0]);
             if (receiveBuffer[0] == 1)
             {
                 printf("Received START packet\n");

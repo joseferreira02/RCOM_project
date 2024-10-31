@@ -10,6 +10,10 @@
 #include <string.h>
 #include <string.h>
 
+
+    int degub = FALSE;
+
+
 // MISC
 #define _POSIX_SOURCE 1 // POSIX compliant source
 
@@ -715,7 +719,7 @@ int llwrite(const unsigned char *buf, int bufSize)
         }
 
         int readBytes = readByteSerialPort(&curr_byte);
-        
+
         if (readBytes < 0)
         {
             printf("error\n");
@@ -730,30 +734,79 @@ int llwrite(const unsigned char *buf, int bufSize)
         // Process the acceptance or rejection frame sent back by the receiver
         result = processCtrlByte(&sm, ADDRESS_RX, IControlByte, curr_byte, ackFrame, &bufferPosition);
 
-    }
+        if (result == 0)
+        {
+            if ((ackFrame[2] == RR0 && sequenceNumber == 0) || (ackFrame[2] == RR1 && sequenceNumber == 1))
+            {
+                printf("Repeated frame. Retransmiting...\n");
 
-    if ((ackFrame[2] == RR0 && sequenceNumber == 0) || (ackFrame[2] == RR1 && sequenceNumber == 1)){
+                alarmEnabled = FALSE;
+                alarmCount++;
+
+                // SET UP STATE MACHINE AND BUFFER
+                sm.currentState = START_STATE;
+
+                // Wait for acknowledgment frame (RR or REJ)
+                bufferPosition = 0;
+                result = -1;
+                bytesSent = 0;
+
+                continue;
+            }
+            if ((ackFrame[2] == RR0 && sequenceNumber == 1) || (ackFrame[2] == RR1 && sequenceNumber == 0))
+            {
+                printf("Acknowledged frame.\n");
+                alarm(0);
+                sequenceNumber = (sequenceNumber + 1) % 2; // Update Sequence Number
+                break;
+            }
+            if (ackFrame[2] == REJ0 || ackFrame[2] == REJ1)
+            {
+                printf("Frame rejected. Retransmiting...\n");
+                alarmEnabled = FALSE;
+                alarmCount++;
+
+                // reset variables
+
+                // SET UP STATE MACHINE AND BUFFER
+                sm.currentState = START_STATE;
+
+                // Wait for acknowledgment frame (RR or REJ)
+                bufferPosition = 0;
+                result = -1;
+                bytesSent = 0;
+
+                continue;
+            }
+        }
+    }
+    /*
+        if ((ackFrame[2] == RR0 && sequenceNumber == 0) || (ackFrame[2] == RR1 && sequenceNumber == 1))
+        {
             printf("Repeated frame. Retransmiting...\n");
             alarmEnabled = FALSE;
             alarmCount++;
         }
-    else if ((ackFrame[2] == RR0 && sequenceNumber == 1) || (ackFrame[2] == RR1 && sequenceNumber == 0)){
-        printf("Acknowledged frame.\n");
-        alarm(0);
-        sequenceNumber = (sequenceNumber + 1) % 2; // Update Sequence Number
-    }
-    else if (result == REJ_RECEIVED){
-        printf("Frame rejected. Retransmiting...\n");
-        alarmEnabled = FALSE;
-        alarmCount++;
-    }
+        else if ((ackFrame[2] == RR0 && sequenceNumber == 1) || (ackFrame[2] == RR1 && sequenceNumber == 0))
+        {
+            printf("Acknowledged frame.\n");
+            alarm(0);
+            sequenceNumber = (sequenceNumber + 1) % 2; // Update Sequence Number
+        }
+        else if (ackFrame[2] == REJ0 || ackFrame[2] == REJ1)
+        {
+            printf("Frame rejected. Retransmiting...\n");
+            alarmEnabled = FALSE;
+            alarmCount++;
+        }
 
-    if (alarmCount == cp.nRetransmissions)
-    {
-        printf("Maximum retransmissions reached. Exiting...\n");
-        alarm(0);
-        return -1;
-    }
+        if (alarmCount == cp.nRetransmissions)
+        {
+            printf("Maximum retransmissions reached. Exiting...\n");
+            alarm(0);
+            return -1;
+        }
+        */
     free(stuffedFrame);
     return bytesSent;
 }
@@ -764,6 +817,7 @@ int llwrite(const unsigned char *buf, int bufSize)
 int llread(unsigned char *packet)
 {
 
+    memset(packet, 0, 504 * sizeof(unsigned char)); // Adjust size as necessary
     StateMachine sm;
     sm.currentState = START_STATE;
     unsigned char curr_byte;
@@ -798,7 +852,6 @@ int llread(unsigned char *packet)
 
     } while (processInfoByte(&sm, ADDRESS_TX, sequenceNumber, curr_byte, &buffer, &bufferPosition, &message, &charsRead) != 0);
 
-
     printf("Number of bytes read: %d\n", charsRead - 1);
 
     // Send RR|REJ
@@ -815,18 +868,32 @@ int llread(unsigned char *packet)
         sequenceNumber = (sequenceNumber + 1) % 2;
         sequenceChar = (sequenceChar == C0) ? C1 : C0;
 
-    
         // printf("SAVING PACKET\n");
         for (int i = 0; i < charsRead - 1; i++)
         {
             packet[i] = message[i];
         }
 
+        if (degub)
+        {
+            for (int i = 0; i < 10; i++)
+            {
+                printf("Message byte : 0x%02X\n", message[i]);
+            }
+            degub = FALSE;
+        }
         printf("CORRECT RR SENT\n");
     }
     if (!isValid)
     {
         sequenceNumber == 0 ? buildCtrlWord(ADDRESS_RX, REJ0) : buildCtrlWord(ADDRESS_RX, REJ1);
+
+        for (int i = 0; i < 10; i++)
+        {
+            printf("Message byte : 0x%02X\n", message[i]);
+        }
+        degub = TRUE;
+
         printf("REJ SENT\n");
     }
 
