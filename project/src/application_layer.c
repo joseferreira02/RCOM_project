@@ -137,8 +137,10 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
         printf("ERROR: Failed to close link layer connection.\n");
         return;
     }
+    
 
 }
+
 
 
 

@@ -111,7 +111,7 @@ void transition(StateMachine *sm, StateType newState)
     sm->currentState = newState;
 }
 
-int processInfoByte(StateMachine *sm, StateType address, unsigned char control, unsigned char curr_byte, unsigned char **buffer, int *bufferPosition, unsigned char **message, int *charsRead)
+int processInfoByte(StateMachine *sm, unsigned char address, unsigned char control, unsigned char curr_byte, unsigned char **buffer, int *bufferPosition, unsigned char **message, int *charsRead)
 {
     // Array of possible RR and REJ control bytes
     switch (sm->currentState)
@@ -170,7 +170,6 @@ int processInfoByte(StateMachine *sm, StateType address, unsigned char control, 
             }
             else
             {
-                sequenceChar = curr_byte;
                 isRepeated = FALSE;
             }
             (*bufferPosition)++;
@@ -613,7 +612,7 @@ int llopen(LinkLayer connectionParameters)
             {
                 continue;
             }
-
+            // printf("Read byte: 0x%02X\n", curr_byte);
         } while (processCtrlByte(&sm, ADDRESS_TX, SET, curr_byte, buf, &bufferPosition) != 0);
 
         printf("SET received\n");
@@ -658,6 +657,8 @@ int llopen(LinkLayer connectionParameters)
                 continue;
             }
 
+            // printf("Read byte: 0x%02X\n", curr_byte);
+
             result = processCtrlByte(&sm, ADDRESS_RX, UA, curr_byte, readbuf, &bufferPosition);
         }
         if (alarmCount == connectionParameters.nRetransmissions)
@@ -682,7 +683,7 @@ int llwrite(const unsigned char *buf, int bufSize)
 {
 
     int stuffedSize = 0;
-    unsigned char* stuffedFrame = createIFrame(buf, bufSize, &stuffedSize);
+    unsigned char *stuffedFrame = createIFrame(buf, bufSize, &stuffedSize);
 
     (void)signal(SIGALRM, alarmHandler);
 
@@ -699,8 +700,11 @@ int llwrite(const unsigned char *buf, int bufSize)
     resetAlarm();
 
     // Retransmission logic
-    while (alarmCount < cp.nRetransmissions && result < 0){
-        if(alarmEnabled == FALSE){
+    while (alarmCount < cp.nRetransmissions && result < 0)
+    {
+
+        if (alarmEnabled == FALSE)
+        {
             // Send the frame
             bytesSent = writeBytesSerialPort(stuffedFrame, stuffedSize);
             printf("Sent I Frame\n");
@@ -717,7 +721,8 @@ int llwrite(const unsigned char *buf, int bufSize)
             printf("error\n");
             exit(-1);
         }
-        if (readBytes == 0) continue;
+        if (readBytes == 0)
+            continue;
 
         printf("Read byte: 0x%02X\n", curr_byte);
 
@@ -804,6 +809,11 @@ int llread(unsigned char *packet)
     if (isValid && !isRepeated)
     {
         sequenceNumber == 1 ? buildCtrlWord(ADDRESS_RX, RR0) : buildCtrlWord(ADDRESS_RX, RR1);
+
+        // change sequenceNumber
+        sequenceNumber = (sequenceNumber + 1) % 2;
+        sequenceChar = (sequenceChar == C0) ? C1 : C0;
+
         // saves packet
         packet = (unsigned char *)malloc(charsRead - 1);
 
@@ -813,7 +823,7 @@ int llread(unsigned char *packet)
             exit(-1);
         }
 
-        printf("SAVING PACKET\n");
+        // printf("SAVING PACKET\n");
         for (int i = 0; i < charsRead - 1; i++)
         {
             packet[i] = message[i];
@@ -831,11 +841,12 @@ int llread(unsigned char *packet)
     bytesRead += charsRead - 1;
     free(message);
     free(buffer);
-
+    printf("0x%02X\n", sequenceChar);
+    printf("Sequence Number: %d\n", sequenceNumber);
 
     return charsRead - 1;
 }
-
+// rr0 and se
 ////////////////////////////////////////////////
 // LLCLOSE
 ////////////////////////////////////////////////
@@ -866,6 +877,7 @@ int llclose(int showStatistics)
             {
                 continue;
             }
+            // printf("Read byte: 0x%02X\n", curr_byte);
         } while (processCtrlByte(&sm, ADDRESS_TX, DISC, curr_byte, buf, &bufferPosition) != 0);
         printf("DISC received\n");
 
