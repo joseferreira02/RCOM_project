@@ -418,7 +418,7 @@ int processCtrlByte(StateMachine *sm, StateType address, unsigned char control, 
         }
         else
         {
-            transition(sm, START_STATE);
+            return 0;
         }
         break;
 
@@ -798,6 +798,7 @@ int llread(unsigned char *packet)
 
     } while (processInfoByte(&sm, ADDRESS_TX, sequenceNumber, curr_byte, &buffer, &bufferPosition, &message, &charsRead) != 0);
 
+
     printf("Number of bytes read: %d\n", charsRead - 1);
 
     // Send RR|REJ
@@ -814,20 +815,11 @@ int llread(unsigned char *packet)
         sequenceNumber = (sequenceNumber + 1) % 2;
         sequenceChar = (sequenceChar == C0) ? C1 : C0;
 
-        // saves packet
-        packet = (unsigned char *)malloc(charsRead - 1);
-
-        if (packet == NULL)
-        {
-            printf("Memory allocation failed\n");
-            exit(-1);
-        }
-
+    
         // printf("SAVING PACKET\n");
         for (int i = 0; i < charsRead - 1; i++)
         {
             packet[i] = message[i];
-            printf("0x%02X ", packet[i]);
         }
 
         printf("CORRECT RR SENT\n");
@@ -841,7 +833,6 @@ int llread(unsigned char *packet)
     bytesRead += charsRead - 1;
     free(message);
     free(buffer);
-    printf("0x%02X\n", sequenceChar);
     printf("Sequence Number: %d\n", sequenceNumber);
 
     return charsRead - 1;
