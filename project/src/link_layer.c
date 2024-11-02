@@ -2,15 +2,15 @@
 
 #include "link_layer.h"
 #include "serial_port.h"
-
 #include <signal.h>
-#include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <string.h>
+#include <time.h>
+extern time_t start, end;
 
-int totalPacketREad = 0;
+int totalPacketsRead = 0;
 // MISC
 #define _POSIX_SOURCE 1 // POSIX compliant source
 
@@ -53,6 +53,15 @@ long int bytesRead = 0;
 // 00000000 / 0x00 Information frame number 0
 // 10000000 / 0x80 Information frame number 1
 //
+
+typedef struct{
+    int framesSent;
+    int framesReceived;
+    int framesRetransmitted;
+    int errorFrames;
+} transmitionStats;
+
+transmitionStats stats = {0,0,0,0};
 
 ////////////////////////////////////////////////
 // Alarm Handler
@@ -709,6 +718,7 @@ int llwrite(const unsigned char *buf, int bufSize)
             // Send the frame
             bytesSent = writeBytesSerialPort(stuffedFrame, stuffedSize);
             printf("Sent I Frame\n");
+            stats.framesSent++;
             printf("BCC2: 0x%02X\n", stuffedFrame[stuffedSize - 3]);
             // Start timer
             alarm(cp.timeout);
@@ -736,7 +746,7 @@ int llwrite(const unsigned char *buf, int bufSize)
             if ((ackFrame[2] == RR0 && sequenceNumber == 0) || (ackFrame[2] == RR1 && sequenceNumber == 1))
             {
                 printf("Repeated frame. Retransmiting...\n");
-
+                stats.framesRetransmitted++;
                 // SET UP STATE MACHINE AND BUFFER
                 sm.currentState = START_STATE;
                 
@@ -760,6 +770,7 @@ int llwrite(const unsigned char *buf, int bufSize)
             if (ackFrame[2] == REJ0 || ackFrame[2] == REJ1)
             {
                 printf("Frame rejected. Retransmiting...\n");
+                stats.framesRetransmitted++;
                 alarmEnabled = FALSE;
                 
 
@@ -777,33 +788,6 @@ int llwrite(const unsigned char *buf, int bufSize)
             }
         }
     }
-    /*
-        if ((ackFrame[2] == RR0 && sequenceNumber == 0) || (ackFrame[2] == RR1 && sequenceNumber == 1))
-        {
-            printf("Repeated frame. Retransmiting...\n");
-            alarmEnabled = FALSE;
-            alarmCount++;
-        }
-        else if ((ackFrame[2] == RR0 && sequenceNumber == 1) || (ackFrame[2] == RR1 && sequenceNumber == 0))
-        {
-            printf("Acknowledged frame.\n");
-            alarm(0);
-            sequenceNumber = (sequenceNumber + 1) % 2; // Update Sequence Number
-        }
-        else if (ackFrame[2] == REJ0 || ackFrame[2] == REJ1)
-        {
-            printf("Frame rejected. Retransmiting...\n");
-            alarmEnabled = FALSE;
-            alarmCount++;
-        }
-
-        if (alarmCount == cp.nRetransmissions)
-        {
-            printf("Maximum retransmissions reached. Exiting...\n");
-            alarm(0);
-            return -1;
-        }
-        */
 
     if(alarmCount >= cp.nRetransmissions)
     {
@@ -863,13 +847,14 @@ int llread(unsigned char *packet)
 
 
     printf("Number of bytes read: %d\n", charsRead - 1);
-
+    stats.framesReceived++;
     printf("BCC2: 0x%02X\n", message[charsRead - 1]);
     // Send RR|REJ
     if (isValid && isRepeated)
     {
         sequenceNumber == 0 ? buildCtrlWord(ADDRESS_RX, RR0) : buildCtrlWord(ADDRESS_RX, RR1);
         printf("REPEATED RR SENT\n");
+        stats.errorFrames++;
     }
     if (isValid && !isRepeated)
     {
@@ -885,7 +870,7 @@ int llread(unsigned char *packet)
             packet[i] = message[i];
         }
 
-        totalPacketREad++;
+        totalPacketsRead++;
 
         printf("CORRECT RR SENT\n");
     }
@@ -900,6 +885,7 @@ int llread(unsigned char *packet)
                 degub = TRUE;
         */
         printf("REJ SENT\n");
+        stats.errorFrames++;
     }
     bytesRead += charsRead - 1;
     free(message);
@@ -1051,11 +1037,19 @@ int llclose(int showStatistics)
         printf("sent UA\n");
     }
 
+    time(&end);
+    double elapsed_time = difftime(end, start);
+
     if (showStatistics)
     {
         printf("---- Statistics ----\n");
-        printf("Bytes transmitted: %ld\n", bytesRead);
-        printf("PACKET READ : %d\n", totalPacketREad);
+        if (cp.role == LlTx) printf("Frames Sent: %d\n", stats.framesSent);
+        if (cp.role == LlRx) printf("Frames Received: %d\n", stats.framesReceived);
+        if (cp.role == LlRx) printf("Frames With Error: %d\n", stats.errorFrames);
+        if (cp.role == LlTx) printf("Frames Retransmitted: %d\n", stats.framesRetransmitted);
+        printf("Total Time: %.1f seconds\n", elapsed_time);
+        if (cp.role == LlRx) printf("Bytes Read: %ld\n", bytesRead);
+        if (cp.role == LlRx) printf("Packets Read : %d\n", totalPacketsRead);
         printf("--------------------\n");
     }
 
