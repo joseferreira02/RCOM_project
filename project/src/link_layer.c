@@ -104,10 +104,7 @@ typedef enum
     A_RCV,
     C_RCV,
     BCC_RCV,
-
-    // IFRAME
     INFO_STATE,
-
     STOP_STATE
 } StateType;
 
