@@ -34,7 +34,6 @@ int read_url(char *path, struct URL *url)
         {
             strncpy(url->user, path, colon - path);
             strncpy(url->password, colon + 1, at_sign - colon - 1);
-            
         }
         else
         {
@@ -100,37 +99,45 @@ int create_socket(char *ip, int port)
     return sockfd;
 }
 
-int read_response(const int socket, char *response)
+int get_code_response(const char *buffer)
 {
-    char buffer[RESPONSE_LENGTH];
-    int bytes_read;
-    int total_bytes_read = 0;
-
-    // Clear the response buffer
-    memset(response, 0, RESPONSE_LENGTH);
-
-    // Read the response from the server
-    while ((bytes_read = read(socket, buffer, sizeof(buffer) - 1)) > 0)
+    if (buffer == NULL || strlen(buffer) < 3)
     {
-        buffer[bytes_read] = '\0'; // Null-terminate the buffer
-        strcat(response, buffer);  // Append the buffer to the response
-        total_bytes_read += bytes_read;
-
-        // Check if the response is complete (ends with a newline)
-        if (buffer[bytes_read - 1] == '\n')
-        {
-            break;
-        }
-    }
-
-    if (bytes_read < 0)
-    {
-        perror("read()");
+        perror("Invalid response from server!");
         return -1;
     }
 
-    int response_code = atoi(response);
-    return response_code;
+    char code_str[4];
+    strncpy(code_str, buffer, 3);
+    code_str[3] = '\0';
+
+    return atoi(code_str);
+}
+
+int read_response(const int socket, char *response)
+{
+    char buffer[RESPONSE_LENGTH];
+    char byte;
+    int index = 0;
+    memset(response, 0, RESPONSE_LENGTH);
+
+    while (1)
+    {
+        read(socket, &byte, 1);
+        buffer[index++] = byte;
+        if (byte == '\n')
+        {
+            if (strchr(buffer, ' ') == &buffer[3])
+            {
+                break;
+            }
+            index = 0;
+            memset(buffer, 0, RESPONSE_LENGTH);
+        }
+    }
+
+    strcpy(response, buffer);
+    return get_code_response(buffer);
 }
 
 int auth_connection(const int socket, const char *user, const char *pass)
@@ -210,10 +217,11 @@ int request_download(const int socket, const char *filePath)
         return -1;
     }
 
-    int resp=read_response(socket, response);
-    if ( resp != SV_FILE_STATUS_OK)
+    int resp = read_response(socket, response);
+    if (resp != SV_FILE_STATUS_OK)
     {
-        if(resp == SV_ALREADY_OPEN){
+        if (resp == SV_ALREADY_OPEN)
+        {
             return 0;
         }
         fprintf(stderr, "Failed to initiate file download. Response: %s\n", response);
@@ -270,10 +278,11 @@ int download_file(const int socketMain, const int socketData, const char *filePa
 
     fclose(file);
 
-    int resp=read_response(socketMain, response);
-    if (resp!= SV_TRANSFER_COMPLETE)
+    int resp = read_response(socketMain, response);
+    if (resp != SV_TRANSFER_COMPLETE)
     {
-        if(resp == SV_DATA_SOCKET_UNCLOSED){
+        if (resp == SV_DATA_SOCKET_UNCLOSED)
+        {
             return 0;
         }
         fprintf(stderr, "File transfer was not completed successfully. Response: %s\n", response);
@@ -301,19 +310,8 @@ int close_connection(const int socketMain, const int socketData)
         return -1;
     }
 
-    /*
-    if (close(socketData) < 0)
-    {
-        perror("close()");
-        return -1;
-    }
-
-    if (close(socketMain) < 0)
-    {
-        perror("close()");
-        return -1;
-    }
-    */
+    close(socketData);
+    close(socketMain);
 
     return 0;
 }
@@ -341,7 +339,6 @@ int main(int argc, char *argv[])
         fprintf(stderr, "Failed to parse URL.\n");
         return EXIT_FAILURE;
     }
-
 
     char response[RESPONSE_LENGTH];
     int socketMain = create_socket(url.ip, PORT);
@@ -398,9 +395,5 @@ int main(int argc, char *argv[])
     }
 
     printf("File downloaded successfully.\n");
-    close(socketMain);
-    close(socketData);
-    
-
     return EXIT_SUCCESS;
 }

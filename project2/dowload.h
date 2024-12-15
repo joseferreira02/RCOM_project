@@ -1,3 +1,6 @@
+#ifndef DOWNLOAD_H
+#define DOWNLOAD_H
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -12,8 +15,7 @@
 #define USER "anonymous"
 #define PASS "anonymous@"
 
-
-//server response codes
+// server response codes
 
 // Connection Responses
 #define SV_REGISTER 220   // Service ready for a new user
@@ -37,7 +39,6 @@
 // Quit and Session Responses
 #define SV_CLOSING 221 // Service closing control connection
 
-
 #define RESPONSE_LENGTH 1024
 
 // Structure to store URL components
@@ -51,22 +52,27 @@ struct URL
     char ip[MAX_LENGTH];
 };
 
-#define h_addr h_addr_list[0] //The first address in h_addr_list.
+typedef enum {
+    START,
+    SINGLE,
+    MULTIPLE,
+    END
+} ResponseState;
 
+
+
+#define h_addr h_addr_list[0] // The first address in h_addr_list
+
+// Function prototypes
 int read_url(char *path, struct URL *url);
-
 int create_socket(char *ip, int port);
-
 int get_ip(char *hostname, char *ip);
-
 int auth_connection(const int socket, const char *user, const char *pass);
-
 int enter_passive_mode(const int socket, char *ip, int *port);
-
 int close_connection(const int socket, const int socketB);
-
 int read_response(const int socket, char *response);
-
 int request_download(const int socket, const char *filePath);
+int download_file(const int socketMain, const int socketData, const char *filePath);
+int get_code_response(const char *buffer);
 
-int download_file(const int socketMain,const int socketData, const char *filePath);
+#endif // DOWNLOAD_H
