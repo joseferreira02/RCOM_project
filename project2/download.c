@@ -397,6 +397,7 @@ int main(int argc, char *argv[])
         return EXIT_FAILURE;
     }
 
+    printf("File downloaded successfully.\n");
     close(socketMain);
     close(socketData);
     
